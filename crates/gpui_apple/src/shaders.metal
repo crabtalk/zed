@@ -1277,3 +1277,58 @@ float4 fill_color(Background background,
 
   return color;
 }
+
+struct BackdropBlurVertexOutput {
+  float4 position [[position]];
+  uint blur_id [[flat]];
+  float clip_distance [[clip_distance]][4];
+};
+
+struct BackdropBlurFragmentInput {
+  float4 position [[position]];
+  uint blur_id [[flat]];
+};
+
+vertex BackdropBlurVertexOutput backdrop_blur_vertex(
+    uint unit_vertex_id [[vertex_id]], uint blur_id [[instance_id]],
+    constant float2 *unit_vertices [[buffer(BackdropBlurInputIndex_Vertices)]],
+    constant BackdropBlur *blurs [[buffer(BackdropBlurInputIndex_Blurs)]],
+    constant Size_DevicePixels *viewport_size
+    [[buffer(BackdropBlurInputIndex_ViewportSize)]]) {
+  float2 unit_vertex = unit_vertices[unit_vertex_id];
+  BackdropBlur blur = blurs[blur_id];
+  float4 device_position =
+      to_device_position(unit_vertex, blur.bounds, viewport_size);
+  float4 clip_distance = distance_from_clip_rect(unit_vertex, blur.bounds,
+                                                 blur.content_mask.bounds);
+  return BackdropBlurVertexOutput{
+      device_position,
+      blur_id,
+      {clip_distance.x, clip_distance.y, clip_distance.z, clip_distance.w}};
+}
+
+fragment float4 backdrop_blur_fragment(
+    BackdropBlurFragmentInput input [[stage_in]],
+    constant BackdropBlur *blurs [[buffer(BackdropBlurInputIndex_Blurs)]],
+    constant Size_DevicePixels *viewport_size
+    [[buffer(BackdropBlurInputIndex_ViewportSize)]],
+    texture2d<float> source_texture
+    [[texture(BackdropBlurInputIndex_SourceTexture)]]) {
+  constexpr sampler source_sampler(coord::normalized, address::clamp_to_edge,
+                                   filter::linear);
+  BackdropBlur blur = blurs[input.blur_id];
+
+  // Rounded-rect clip: blending is disabled on this pipeline (the blur
+  // REPLACES the region), so fragments outside must discard, not return 0.
+  float distance = quad_sdf(input.position.xy, blur.bounds, blur.corner_radii);
+  if (distance > 0.) {
+    discard_fragment();
+  }
+
+  // The snapshot was gaussian-blurred on the GPU (MPSImageGaussianBlur)
+  // before this pass — one clean sample.
+  float2 viewport =
+      float2((float)viewport_size->width, (float)viewport_size->height);
+  float2 uv = input.position.xy / viewport;
+  return source_texture.sample(source_sampler, uv);
+}

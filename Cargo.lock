@@ -8056,6 +8056,7 @@ dependencies = [
  "gpui_macos",
  "gpui_web",
  "gpui_windows",
+ "reqwest_client",
 ]
 
 [[package]]

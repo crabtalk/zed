@@ -1,8 +1,9 @@
 [package]
-name = "collections"
-version = "0.1.0"
+name = "bezel-zed-collections"
+version = "0.3.0+zed.bc538d"
+readme = "README.md"
+repository = "https://github.com/crabtalk/zed"
 edition.workspace = true
-publish = false
 license = "Apache-2.0"
 description = "Standard collection types used by Zed and GPUI"
 
@@ -10,6 +11,7 @@ description = "Standard collection types used by Zed and GPUI"
 workspace = true
 
 [lib]
+name = "collections"
 path = "src/collections.rs"
 doctest = false
 

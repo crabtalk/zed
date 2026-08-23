@@ -1,12 +1,14 @@
 [package]
-name = "perf"
-version = "0.1.0"
-publish = false
+name = "bezel-zed-perf"
+version = "0.3.0+zed.bc538d"
+readme = "README.md"
+repository = "https://github.com/crabtalk/zed"
 edition.workspace = true
 license = "Apache-2.0"
 description = "A tool for measuring Zed test performance, with too many Clippy lints"
 
 [lib]
+name = "perf"
 
 # Some personal lint preferences :3
 [lints.rust]

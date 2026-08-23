@@ -1,14 +1,17 @@
 [package]
-name = "gpui_wgpu"
-version = "0.1.0"
+name = "bezel-gpui-wgpu"
+version = "0.3.0+zed.bc538d"
+description = "gpui_wgpu from zed-industries/zed, republished for the bezel gpui fork"
+readme = "README.md"
+repository = "https://github.com/crabtalk/zed"
 edition.workspace = true
-publish.workspace = true
 license = "Apache-2.0"
 
 [lints]
 workspace = true
 
 [lib]
+name = "gpui_wgpu"
 path = "src/gpui_wgpu.rs"
 
 [features]
@@ -47,10 +50,6 @@ wasm-bindgen-futures.workspace = true
 web-sys = { version = "0.3", features = ["HtmlCanvasElement"] }
 js-sys.workspace = true
 wgpu = { workspace = true, features = ["webgl"] }
-
-[dev-dependencies]
-criterion.workspace = true
-naga = { version = "29.0.4", features = ["wgsl-in"] }
 
 [[bench]]
 name = "layout_line"

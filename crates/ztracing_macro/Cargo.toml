@@ -1,11 +1,14 @@
 [package]
-name = "ztracing_macro"
-version = "0.1.0"
+name = "bezel-zed-ztracing-macro"
+version = "0.3.0+zed.bc538d"
+description = "ztracing_macro from zed-industries/zed, republished for the bezel gpui fork"
+readme = "README.md"
+repository = "https://github.com/crabtalk/zed"
 edition.workspace = true
-publish.workspace = true
 license = "GPL-3.0-or-later"
 
 [lib]
+name = "ztracing_macro"
 proc-macro = true
 
 [dependencies]

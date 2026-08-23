@@ -265,6 +265,7 @@ members = [
 default-members = ["crates/zed"]
 
 [workspace.package]
+version = "0.3.0+zed.bc538d"
 publish = false
 edition = "2024"
 
@@ -304,7 +305,7 @@ cloud_api_types = { path = "crates/cloud_api_types" }
 cloud_llm_client = { path = "crates/cloud_llm_client" }
 collab = { path = "crates/collab" }
 collab_ui = { path = "crates/collab_ui" }
-collections = { path = "crates/collections", version = "0.1.0" }
+collections = { package = "bezel-zed-collections", path = "crates/collections", version = "0.3.0+zed.bc538d" }
 command_palette = { path = "crates/command_palette" }
 command_palette_hooks = { path = "crates/command_palette_hooks" }
 compliance = { path = "tooling/compliance" }
@@ -326,7 +327,7 @@ debug_adapter_extension = { path = "crates/debug_adapter_extension" }
 debugger_tools = { path = "crates/debugger_tools" }
 debugger_ui = { path = "crates/debugger_ui" }
 deepseek = { path = "crates/deepseek" }
-derive_refineable = { path = "crates/refineable/derive_refineable" }
+derive_refineable = { package = "bezel-zed-derive-refineable", path = "crates/refineable/derive_refineable", version = "0.3.0+zed.bc538d" }
 dev_container = { path = "crates/dev_container" }
 diagnostics = { path = "crates/diagnostics" }
 dialoguer = { version = "0.12", default-features = false }
@@ -353,21 +354,21 @@ git_ui_core = { path = "crates/git_ui_core" }
 go_to_line = { path = "crates/go_to_line" }
 google_ai = { path = "crates/google_ai" }
 grammars = { path = "crates/grammars" }
-gpui = { path = "crates/gpui", default-features = false }
-gpui_apple = { path = "crates/gpui_apple" }
-gpui_shared_string = { path = "crates/gpui_shared_string" }
-gpui_linux = { path = "crates/gpui_linux", default-features = false }
-gpui_macos = { path = "crates/gpui_macos", default-features = false }
-gpui_macros = { path = "crates/gpui_macros" }
-gpui_platform = { path = "crates/gpui_platform", default-features = false }
-gpui_web = { path = "crates/gpui_web" }
-gpui_wgpu = { path = "crates/gpui_wgpu" }
-gpui_windows = { path = "crates/gpui_windows", default-features = false }
+gpui = { package = "bezel-gpui", path = "crates/gpui", default-features = false, version = "0.3.0+zed.bc538d" }
+gpui_apple = { package = "bezel-gpui-apple", path = "crates/gpui_apple", version = "0.3.0+zed.bc538d" }
+gpui_shared_string = { package = "bezel-gpui-shared-string", path = "crates/gpui_shared_string", version = "0.3.0+zed.bc538d" }
+gpui_linux = { package = "bezel-gpui-linux", path = "crates/gpui_linux", default-features = false, version = "0.3.0+zed.bc538d" }
+gpui_macos = { package = "bezel-gpui-macos", path = "crates/gpui_macos", default-features = false, version = "0.3.0+zed.bc538d" }
+gpui_macros = { package = "bezel-gpui-macros", path = "crates/gpui_macros", version = "0.3.0+zed.bc538d" }
+gpui_platform = { package = "bezel-gpui-platform", path = "crates/gpui_platform", default-features = false, version = "0.3.0+zed.bc538d" }
+gpui_web = { package = "bezel-gpui-web", path = "crates/gpui_web", version = "0.3.0+zed.bc538d" }
+gpui_wgpu = { package = "bezel-gpui-wgpu", path = "crates/gpui_wgpu", version = "0.3.0+zed.bc538d" }
+gpui_windows = { package = "bezel-gpui-windows", path = "crates/gpui_windows", default-features = false, version = "0.3.0+zed.bc538d" }
 gpui_tokio = { path = "crates/gpui_tokio" }
-gpui_util = { path = "crates/gpui_util" }
+gpui_util = { package = "bezel-gpui-util", path = "crates/gpui_util", version = "0.3.0+zed.bc538d" }
 html_to_markdown = { path = "crates/html_to_markdown" }
-http_client = { path = "crates/http_client" }
-http_client_tls = { path = "crates/http_client_tls" }
+http_client = { package = "bezel-zed-http-client", path = "crates/http_client", version = "0.3.0+zed.bc538d" }
+http_client_tls = { package = "bezel-zed-http-client-tls", path = "crates/http_client_tls", version = "0.3.0+zed.bc538d" }
 http_proxy = { path = "crates/http_proxy" }
 icons = { path = "crates/icons" }
 image_viewer = { path = "crates/image_viewer" }
@@ -402,7 +403,7 @@ markdown = { path = "crates/markdown" }
 markdown_preview = { path = "crates/markdown_preview" }
 mermaid_render = { path = "crates/mermaid_render" }
 svg_preview = { path = "crates/svg_preview" }
-media = { path = "crates/media" }
+media = { package = "bezel-zed-media", path = "crates/media", version = "0.3.0+zed.bc538d" }
 menu = { path = "crates/menu" }
 mime = "0.3.17"
 migrator = { path = "crates/migrator" }
@@ -424,8 +425,8 @@ outline = { path = "crates/outline" }
 outline_panel = { path = "crates/outline_panel" }
 panel = { path = "crates/panel" }
 paths = { path = "crates/paths" }
-path = { path = "crates/path" }
-perf = { path = "tooling/perf" }
+path = { package = "bezel-zed-path", path = "crates/path", version = "0.3.0+zed.bc538d" }
+perf = { package = "bezel-zed-perf", path = "tooling/perf", version = "0.3.0+zed.bc538d" }
 picker = { path = "crates/picker" }
 picker_preview = { path = "crates/picker_preview" }
 prettier = { path = "crates/prettier" }
@@ -437,17 +438,17 @@ prompt_store = { path = "crates/prompt_store" }
 proto = { path = "crates/proto" }
 proxy_handshake = { path = "crates/proxy_handshake" }
 recent_projects = { path = "crates/recent_projects" }
-refineable = { path = "crates/refineable" }
+refineable = { package = "bezel-zed-refineable", path = "crates/refineable", version = "0.3.0+zed.bc538d" }
 release_channel = { path = "crates/release_channel" }
 remote = { path = "crates/remote" }
 remote_connection = { path = "crates/remote_connection" }
 remote_server = { path = "crates/remote_server" }
 repl = { path = "crates/repl" }
-reqwest_client = { path = "crates/reqwest_client" }
+reqwest_client = { package = "bezel-zed-reqwest-client", path = "crates/reqwest_client", version = "0.3.0+zed.bc538d" }
 rodio = { git = "https://github.com/RustAudio/rodio", rev = "e50e726ddd0292f6ef9de0dda6b90af4ed1fb66a", features = ["wav", "playback", "wav_output", "recording"] }
 rope = { path = "crates/rope" }
 rpc = { path = "crates/rpc" }
-scheduler = { path = "crates/scheduler" }
+scheduler = { package = "bezel-zed-scheduler", path = "crates/scheduler", version = "0.3.0+zed.bc538d" }
 sandbox = { path = "crates/sandbox" }
 search = { path = "crates/search" }
 session = { path = "crates/session" }
@@ -464,7 +465,7 @@ snippets_ui = { path = "crates/snippets_ui" }
 sqlez = { path = "crates/sqlez" }
 sqlez_macros = { path = "crates/sqlez_macros" }
 streaming_diff = { path = "crates/streaming_diff" }
-sum_tree = { path = "crates/sum_tree" }
+sum_tree = { package = "bezel-zed-sum-tree", path = "crates/sum_tree", version = "0.3.0+zed.bc538d" }
 codestral = { path = "crates/codestral" }
 system_specs = { path = "crates/system_specs" }
 syntax_theme = { path = "crates/syntax_theme" }
@@ -489,7 +490,7 @@ ui_input = { path = "crates/ui_input" }
 ui_macros = { path = "crates/ui_macros" }
 ui_prompt = { path = "crates/ui_prompt" }
 util = { path = "crates/util" }
-util_macros = { path = "crates/util_macros" }
+util_macros = { package = "bezel-zed-util-macros", path = "crates/util_macros", version = "0.3.0+zed.bc538d" }
 vim = { path = "crates/vim" }
 vim_mode_setting = { path = "crates/vim_mode_setting" }
 which_key = { path = "crates/which_key" }
@@ -507,10 +508,10 @@ zed_env_vars = { path = "crates/zed_env_vars" }
 edit_prediction = { path = "crates/edit_prediction" }
 edit_prediction_metrics = { path = "crates/edit_prediction_metrics" }
 zeta_prompt = { path = "crates/zeta_prompt" }
-zlog = { path = "crates/zlog" }
+zlog = { package = "bezel-zed-zlog", path = "crates/zlog", version = "0.3.0+zed.bc538d" }
 zlog_settings = { path = "crates/zlog_settings" }
-ztracing = { path = "crates/ztracing" }
-ztracing_macro = { path = "crates/ztracing_macro" }
+ztracing = { package = "bezel-zed-ztracing", path = "crates/ztracing", version = "0.3.0+zed.bc538d" }
+ztracing_macro = { package = "bezel-zed-ztracing-macro", path = "crates/ztracing_macro", version = "0.3.0+zed.bc538d" }
 
 #
 # External crates
@@ -1132,3 +1133,232 @@ ignored = [
 # this workspace on purpose.
 [workspace.metadata.dylint]
 libraries = [{ path = "tooling/lints" }]
+
+[workspace.metadata.conta]
+ignore = [
+    "acp_thread",
+    "acp_tools",
+    "action_log",
+    "activity_indicator",
+    "agent",
+    "agent_servers",
+    "agent_settings",
+    "agent_skills",
+    "agent_ui",
+    "ai_onboarding",
+    "anthropic",
+    "askpass",
+    "assets",
+    "audio",
+    "auto_update",
+    "auto_update_helper",
+    "auto_update_ui",
+    "aws_http_client",
+    "bedrock",
+    "benchmarks",
+    "breadcrumbs",
+    "buffer_diff",
+    "call",
+    "channel",
+    "cli",
+    "client",
+    "clock",
+    "cloud_api_client",
+    "cloud_api_types",
+    "cloud_llm_client",
+    "codestral",
+    "collab",
+    "collab_ui",
+    "command_palette",
+    "command_palette_hooks",
+    "compliance",
+    "component",
+    "component_preview",
+    "context_server",
+    "copilot",
+    "copilot_chat",
+    "copilot_ui",
+    "crashes",
+    "credentials_provider",
+    "csv_preview",
+    "dap",
+    "dap_adapters",
+    "db",
+    "debug_adapter_extension",
+    "debugger_tools",
+    "debugger_ui",
+    "deepseek",
+    "dev_container",
+    "diagnostics",
+    "docs_preprocessor",
+    "edit_prediction",
+    "edit_prediction_cli",
+    "edit_prediction_context",
+    "edit_prediction_metrics",
+    "edit_prediction_types",
+    "edit_prediction_ui",
+    "editor",
+    "editor_benchmarks",
+    "encoding_selector",
+    "env_var",
+    "etw_tracing",
+    "eval_cli",
+    "eval_utils",
+    "explorer_command_injector",
+    "extension",
+    "extension_cli",
+    "extension_host",
+    "extensions_ui",
+    "feature_flags",
+    "feature_flags_macros",
+    "feedback",
+    "file_finder",
+    "file_icons",
+    "fs",
+    "fs_benchmarks",
+    "fuzzy",
+    "fuzzy_nucleo",
+    "git",
+    "git_hosting_providers",
+    "git_ui",
+    "git_ui_core",
+    "go_to_line",
+    "google_ai",
+    "gpui_tokio",
+    "grammars",
+    "html_to_markdown",
+    "http_proxy",
+    "icons",
+    "image_viewer",
+    "input_latency_ui",
+    "inspector_ui",
+    "install_cli",
+    "journal",
+    "json_schema_store",
+    "keymap_editor",
+    "language",
+    "language_core",
+    "language_extension",
+    "language_model",
+    "language_model_core",
+    "language_models",
+    "language_models_cloud",
+    "language_onboarding",
+    "language_selector",
+    "language_tools",
+    "languages",
+    "line_ending_selector",
+    "livekit_api",
+    "livekit_client",
+    "llama_cpp",
+    "lmstudio",
+    "lsp",
+    "lsp_locations",
+    "markdown",
+    "markdown_preview",
+    "menu",
+    "mermaid_render",
+    "migrator",
+    "miniprofiler_ui",
+    "mistral",
+    "multi_buffer",
+    "net",
+    "node_runtime",
+    "notifications",
+    "oauth_callback_server",
+    "ollama",
+    "onboarding",
+    "open_ai",
+    "open_path_prompt",
+    "open_router",
+    "openai_subscribed",
+    "opencode",
+    "outline",
+    "outline_panel",
+    "panel",
+    "paths",
+    "picker",
+    "picker_preview",
+    "platform_title_bar",
+    "prettier",
+    "project",
+    "project_benchmarks",
+    "project_panel",
+    "project_symbols",
+    "prompt_store",
+    "proto",
+    "proxy_handshake",
+    "recent_projects",
+    "release_channel",
+    "remote",
+    "remote_connection",
+    "remote_server",
+    "repl",
+    "rope",
+    "rpc",
+    "sandbox",
+    "schema_generator",
+    "search",
+    "session",
+    "settings",
+    "settings_content",
+    "settings_json",
+    "settings_macros",
+    "settings_profile_selector",
+    "settings_ui",
+    "shell_command_parser",
+    "sidebar",
+    "snippet",
+    "snippet_provider",
+    "snippets_ui",
+    "sqlez",
+    "sqlez_macros",
+    "streaming_diff",
+    "svg_preview",
+    "syntax_theme",
+    "system_specs",
+    "tab_switcher",
+    "task",
+    "tasks_ui",
+    "telemetry",
+    "telemetry_events",
+    "terminal",
+    "terminal_view",
+    "text",
+    "theme",
+    "theme_extension",
+    "theme_importer",
+    "theme_selector",
+    "theme_settings",
+    "time_format",
+    "title_bar",
+    "toolchain_selector",
+    "ui",
+    "ui_input",
+    "ui_macros",
+    "ui_prompt",
+    "util",
+    "vim",
+    "vim_mode_setting",
+    "watch",
+    "web_search",
+    "web_search_providers",
+    "which_key",
+    "windows_resources",
+    "workspace",
+    "worktree",
+    "worktree_benchmarks",
+    "x_ai",
+    "xtask",
+    "zed",
+    "zed_actions",
+    "zed_credentials_provider",
+    "zed_env_vars",
+    "zed_extension_api",
+    "zed_glsl",
+    "zed_html",
+    "zed_proto",
+    "zed_test_extension",
+    "zeta_prompt",
+    "zlog_settings",
+]

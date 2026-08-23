@@ -42,6 +42,72 @@ def published(name):
     return f"{PREFIX}-zed-{name.replace('_', '-')}"
 
 
+# A git dependency with a `version` silently republishes as that registry crate.
+# zed's wasm_thread fork fixes a worker bootstrap that the registry 0.3.3 still
+# gets wrong, and the fork is not on crates.io — so shipping this feature would
+# compile against one crate and run against another.
+UNPUBLISHABLE = {
+    "gpui_web": ("multithreaded", "wasm_thread"),
+    # `util` reaches a forked async-process through [patch.crates-io], which
+    # publication strips — the published crate would compile against registry
+    # async-process, which has no `adopt_raw_pid`. The feature downloads GitHub
+    # releases; nothing gpui needs.
+    "http_client": ("github-download", "util"),
+}
+
+# Crates that leave the closure once the edges above are cut.
+EXCLUDE = {"util"}
+
+
+def strip_dev_deps(text):
+    """Published manifests carry no dev-dependencies.
+
+    gpui dev-depends on gpui_platform and gpui_web, which depend on gpui; once
+    the rewrite gives those entries a version, cargo demands they already exist
+    on the registry and no publish order can satisfy the cycle.
+    """
+    out, skipping = [], False
+    for line in text.splitlines(keepends=True):
+        if line.startswith("["):
+            skipping = bool(re.match(r"^\[(target\.[^\]]*\.)?dev-dependencies\]", line))
+        if not skipping:
+            out.append(line)
+    return "".join(out)
+
+
+def versionless_git_deps(root_text):
+    """Workspace deps declared by git with no version — cargo refuses to publish
+    a manifest that references one, even optionally."""
+    return {m.group(1) for m in re.finditer(r"^([A-Za-z0-9_-]+) = \{([^}]*)\}$",
+                                            root_text, flags=re.M)
+            if "git = " in m.group(2) and "version = " not in m.group(2)}
+
+
+def drop_versionless(text, name, versionless):
+    """Remove optional deps on versionless git crates, and their feature refs."""
+    for dep in sorted(versionless):
+        pattern = rf"^{re.escape(dep)} = \{{[^}}]*optional = true[^}}]*\}}\n"
+        if not re.search(pattern, text, flags=re.M):
+            continue
+        text = re.sub(pattern, "", text, flags=re.M)
+        text = re.sub(rf'"(?:dep:)?{re.escape(dep)}",? ?', "", text)
+        print(f"  ! dropped {name} optional dep {dep} — no publishable version")
+    return text
+
+
+def drop_unpublishable(text, name):
+    if name not in UNPUBLISHABLE:
+        return text
+    feature, dep = UNPUBLISHABLE[name]
+    text = re.sub(rf'^(default = \[)"{feature}"(, )?', r"\1", text, flags=re.M)
+    # Emptied, not deleted: unpublished workspace members still name these
+    # features, and `cargo publish -p X` resolves the whole workspace.
+    text = re.sub(rf"^{feature} = \[[^\]]*\]", f"{feature} = []", text, flags=re.M)
+    text = re.sub(rf"^(# [^\n]*\n)*{dep} = \{{[^}}]*\}}\n", "", text, flags=re.M)
+    print(f"  ! dropped {name}:{feature} — {dep} is not publishable")
+    return text
+
+
 def stub(name):
     """A README for a crate that upstream never gave one; crates.io shows this page."""
     return f"""# {published(name)}
@@ -82,6 +148,8 @@ def closure(root):
         seen.add(pkg)
         stack.extend(deps.get(pkg, []))
 
+    seen = {p for p in seen if by_id[p]["name"] not in EXCLUDE}
+
     taken = {}
     for pkg in seen:
         name = by_id[pkg]["name"]
@@ -92,7 +160,9 @@ def closure(root):
 
     edges = {by_id[i]["name"]: [by_id[d]["name"] for d in deps[i] if d in seen]
              for i in seen}
-    return {by_id[i]["name"]: Path(by_id[i]["manifest_path"]) for i in seen}, edges
+    outside = sorted({by_id[i]["name"] for i in members} - {by_id[i]["name"] for i in seen})
+    return ({by_id[i]["name"]: Path(by_id[i]["manifest_path"]) for i in seen},
+            edges, outside)
 
 
 def publish_order(edges):
@@ -121,7 +191,7 @@ def ensure(text, field, value, overwrite):
     return re.sub(r'^(version = "[^"]*")$', rf"\1\n{line}", text, count=1, flags=re.M)
 
 
-def rewrite_member(text, name, version):
+def rewrite_member(text, name, version, versionless):
     """Publish under the prefixed name; keep the lib name so no source changes."""
     text = re.sub(rf'^name = "{re.escape(name)}"$',
                   f'name = "{published(name)}"', text, count=1, flags=re.M)
@@ -141,6 +211,10 @@ def rewrite_member(text, name, version):
                   f"{name} from zed-industries/zed, republished for the bezel gpui fork",
                   overwrite=False)
 
+    text = drop_unpublishable(text, name)
+    text = drop_versionless(text, name, versionless)
+    text = strip_dev_deps(text)
+
     if re.search(r"^\[lib\]$", text, flags=re.M):
         if not re.search(r"^\[lib\]\n(?:[a-z-]+ = .*\n)*?name = ", text, flags=re.M):
             text = re.sub(r"^\[lib\]$", f'[lib]\nname = "{name}"', text,
@@ -151,8 +225,16 @@ def rewrite_member(text, name, version):
     return text
 
 
-def rewrite_root(text, names, version):
-    """Point each workspace dep at the published name; path deps need a version."""
+def rewrite_root(text, names, version, outside):
+    """Point each workspace dep at the published name; path deps need a version.
+
+    `[workspace.package]` also gains the version: conta reads it from there to
+    decide which crates are already on crates.io, and upstream has none.
+    """
+    text = re.sub(r"^\[workspace\.package\]\n",
+                  f'[workspace.package]\nversion = "{version}"\n',
+                  text, count=1, flags=re.M)
+
     for name in names:
         pattern = rf'^{re.escape(name)} = \{{([^}}]*)\}}$'
         match = re.search(pattern, text, flags=re.M)
@@ -163,6 +245,13 @@ def rewrite_root(text, names, version):
         body = re.sub(r'\s*version = "[^"]*",?', "", body).strip().rstrip(",")
         entry = f'{name} = {{ package = "{published(name)}", {body}, version = "{version}" }}'
         text = text[: match.start()] + entry + text[match.end():]
+
+    # Every workspace member outside the closure, named explicitly: conta only
+    # skips `publish = false` crates, and zed has members that set publish=true
+    # and would otherwise go up unrenamed. (It also panics if this table is
+    # missing, so it has to be written either way.)
+    listed = ",\n    ".join(f'"{n}"' for n in outside)
+    text += f"\n[workspace.metadata.conta]\nignore = [\n    {listed},\n]\n"
     return text
 
 
@@ -170,18 +259,27 @@ def main():
     args = [a for a in sys.argv[1:] if not a.startswith("--")]
     if len(args) != 1:
         sys.exit(__doc__)
-    version, dry = args[0], "--dry-run" in sys.argv
+    dry = "--dry-run" in sys.argv
 
     root = Path(subprocess.run(["git", "rev-parse", "--show-toplevel"],
                                capture_output=True, text=True, check=True).stdout.strip())
-    crates, edges = closure(root)
+
+    # The release is anchored to the upstream commit it forks from, not to our
+    # own tip: `+zed.<base>` says which zed this is, the way openssl-src's
+    # `+3.6.3` names the OpenSSL it wraps. Abbreviation is git's, not a fixed
+    # width, so it stays unambiguous as the repo grows.
+    merge_base = subprocess.run(["git", "merge-base", "main", "dev"], cwd=root,
+                                capture_output=True, text=True, check=True).stdout.strip()
+    base = subprocess.run(["git", "rev-parse", "--short=6", merge_base], cwd=root,
+                          capture_output=True, text=True, check=True).stdout.strip()
+    version = f"{args[0].split('+')[0]}+zed.{base}"
+
+    crates, edges, outside = closure(root)
+    versionless = versionless_git_deps((root / 'Cargo.toml').read_text())
     print(f"{len(crates)} crates -> {PREFIX}-* @ {version}\n")
 
-    base = subprocess.run(["git", "merge-base", "main", "dev"], cwd=root,
-                          capture_output=True, text=True, check=True).stdout.strip()[:10]
-
     for name, manifest in sorted(crates.items()):
-        new = rewrite_member(manifest.read_text(), name, version)
+        new = rewrite_member(manifest.read_text(), name, version, versionless)
         readme = manifest.parent / "README.md"
         body = readme.read_text() if readme.exists() else stub(name)
         header = notice(name, base)
@@ -192,7 +290,7 @@ def main():
             readme.write_text(f"{header}\n{body}" if MARKER not in body else body)
 
     root_manifest = root / "Cargo.toml"
-    new_root = rewrite_root(root_manifest.read_text(), sorted(crates), version)
+    new_root = rewrite_root(root_manifest.read_text(), sorted(crates), version, outside)
     if not dry:
         root_manifest.write_text(new_root)
 

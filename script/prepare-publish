@@ -75,12 +75,18 @@ def strip_dev_deps(text):
     return "".join(out)
 
 
+# Git pins on the crate's own upstream repo, just at an unreleased commit — the
+# registry crate is the same project, so a version substitutes cleanly. A pin on
+# someone's *fork* must never be substituted; that is what UNPUBLISHABLE is for.
+SUBSTITUTE = {"proptest": 'version = "1", features = ["attr-macro"]'}
+
+
 def versionless_git_deps(root_text):
     """Workspace deps declared by git with no version — cargo refuses to publish
     a manifest that references one, even optionally."""
     return {m.group(1) for m in re.finditer(r"^([A-Za-z0-9_-]+) = \{([^}]*)\}$",
                                             root_text, flags=re.M)
-            if "git = " in m.group(2) and "version = " not in m.group(2)}
+            if "git = " in m.group(2) and "version = " not in m.group(2)} - set(SUBSTITUTE)
 
 
 def drop_versionless(text, name, versionless):
@@ -245,6 +251,10 @@ def rewrite_root(text, names, version, outside):
         body = re.sub(r'\s*version = "[^"]*",?', "", body).strip().rstrip(",")
         entry = f'{name} = {{ package = "{published(name)}", {body}, version = "{version}" }}'
         text = text[: match.start()] + entry + text[match.end():]
+
+    for dep, spec in SUBSTITUTE.items():
+        text = re.sub(rf"^{re.escape(dep)} = \{{[^}}]*\}}$", f"{dep} = {{ {spec} }}",
+                      text, count=1, flags=re.M)
 
     # Every workspace member outside the closure, named explicitly: conta only
     # skips `publish = false` crates, and zed has members that set publish=true

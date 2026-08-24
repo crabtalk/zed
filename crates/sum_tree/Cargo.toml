@@ -1,6 +1,6 @@
 [package]
 name = "bezel-zed-sum-tree"
-version = "0.3.1+zed.d9ad6a"
+version = "0.3.2+zed.d9ad6a"
 readme = "README.md"
 repository = "https://github.com/crabtalk/zed"
 edition.workspace = true
@@ -21,9 +21,10 @@ rayon.workspace = true
 log.workspace = true
 ztracing.workspace = true
 tracing.workspace = true
+proptest = { workspace = true, optional = true }
 
 [package.metadata.cargo-shear]
 ignored = ["tracing"]
 
 [features]
-test-support = []
+test-support = ["proptest"]

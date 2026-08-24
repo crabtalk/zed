@@ -1,8 +1,9 @@
 [package]
-name = "derive_refineable"
-version = "0.1.0"
+name = "bezel-zed-derive-refineable"
+version = "0.3.2+zed.d9ad6a"
+readme = "README.md"
+repository = "https://github.com/crabtalk/zed"
 edition.workspace = true
-publish = false
 license = "Apache-2.0"
 description = "A derive macro for creating refinement types in Rust"
 
@@ -11,6 +12,7 @@ description = "A derive macro for creating refinement types in Rust"
 workspace = true
 
 [lib]
+name = "derive_refineable"
 path = "src/derive_refineable.rs"
 proc-macro = true
 doctest = false

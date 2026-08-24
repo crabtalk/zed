@@ -1,11 +1,10 @@
 [package]
-name = "gpui"
-version = "0.2.2"
+name = "bezel-gpui"
+version = "0.3.2+zed.d9ad6a"
 edition.workspace = true
 authors = ["Nathan Sobo <nathan@zed.dev>"]
 description = "Zed's GPU-accelerated UI framework"
-repository = "https://github.com/zed-industries/zed"
-publish = true
+repository = "https://github.com/crabtalk/zed"
 license = "Apache-2.0"
 homepage = "https://gpui.rs"
 readme = "README.md"
@@ -40,6 +39,7 @@ windows-manifest = ["dep:embed-resource"]
 profiler = ["dep:hdrhistogram"]
 
 [lib]
+name = "gpui"
 path = "src/gpui.rs"
 doctest = false
 
@@ -127,25 +127,6 @@ scap = { workspace = true, optional = true }
 [target.'cfg(target_os = "windows")'.dependencies]
 windows = { workspace = true, features = ["Win32_Foundation", "Win32_System_Power"] }
 
-
-[dev-dependencies]
-backtrace.workspace = true
-collections = { workspace = true, features = ["test-support"] }
-env_logger.workspace = true
-gpui_platform = { workspace = true, features = ["font-kit", "wayland", "x11"] }
-gpui_util = { workspace = true }
-lyon = { version = "1.0", features = ["extra"] }
-rand.workspace = true
-scheduler = { workspace = true, features = ["test-support"] }
-unicode-segmentation = { workspace = true }
-
-[target.'cfg(not(target_family = "wasm"))'.dev-dependencies]
-http_client = { workspace = true, features = ["test-support"] }
-proptest = { workspace = true }
-reqwest_client = { workspace = true, features = ["test-support"] }
-
-[target.'cfg(target_family = "wasm")'.dev-dependencies]
-wasm-bindgen = { workspace = true }
 
 [build-dependencies]
 embed-resource = { version = "3.0", optional = true }

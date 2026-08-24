@@ -1,14 +1,17 @@
 [package]
-name = "gpui_windows"
-version = "0.1.0"
+name = "bezel-gpui-windows"
+version = "0.3.2+zed.d9ad6a"
+description = "gpui_windows from zed-industries/zed, republished for the bezel gpui fork"
+readme = "README.md"
+repository = "https://github.com/crabtalk/zed"
 edition.workspace = true
-publish.workspace = true
 license = "Apache-2.0"
 
 [lints]
 workspace = true
 
 [lib]
+name = "gpui_windows"
 path = "src/gpui_windows.rs"
 
 [features]

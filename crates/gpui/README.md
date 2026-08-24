@@ -1,3 +1,9 @@
+> **NOTICE**
+>
+> `bezel-gpui` is a modified distribution of `gpui` from [zed-industries/zed](https://github.com/zed-industries/zed) — Copyright 2022 - 2025 Zed Industries, Inc., licensed under the Apache License, Version 2.0.
+>
+> Modified by the bezel project; the modifications and their full source are at [crabtalk/zed](https://github.com/crabtalk/zed), based on upstream `d9ad6a`.
+
 # Welcome to GPUI!
 
 GPUI is a hybrid immediate and retained mode, GPU accelerated, UI framework

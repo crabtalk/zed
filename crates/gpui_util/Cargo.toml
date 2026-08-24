@@ -1,8 +1,14 @@
 [package]
-name = "gpui_util"
-version = "0.1.0"
-publish.workspace = true
+name = "bezel-gpui-util"
+version = "0.3.2+zed.d9ad6a"
+description = "gpui_util from zed-industries/zed, republished for the bezel gpui fork"
+license = "Apache-2.0"
+readme = "README.md"
+repository = "https://github.com/crabtalk/zed"
 edition.workspace = true
+
+[lib]
+name = "gpui_util"
 
 [dependencies]
 log.workspace = true

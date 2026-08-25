@@ -1,6 +1,6 @@
 [package]
 name = "bezel-gpui-wgpu"
-version = "0.3.2+zed.d9ad6a"
+version = "0.3.3+zed.d9ad6a"
 description = "gpui_wgpu from zed-industries/zed, republished for the bezel gpui fork"
 readme = "README.md"
 repository = "https://github.com/crabtalk/zed"

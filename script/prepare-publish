@@ -6,7 +6,9 @@ never rebased. Usage: script/prepare-publish <version> [--dry-run]
 """
 
 import json
+import os
 import re
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -57,6 +59,47 @@ UNPUBLISHABLE = {
 
 # Crates that leave the closure once the edges above are cut.
 EXCLUDE = {"util"}
+
+
+INCLUDE = re.compile(r'include_(?:bytes|str)!\(\s*"([^"]+)"\s*\)')
+
+
+def escaping_includes(crate):
+    """Every `include_bytes!`/`include_str!` in the crate that resolves outside it.
+
+    `cargo package` ships only the crate directory, so such a path resolves in
+    the repo and is simply absent from the tarball. Nothing downstream catches
+    it: publication verifies by building for the *host*, where `gpui_web` does
+    not compile at all and gpui's and gpui_wgpu's sites sit behind `cfg(test)`.
+    `bezel-gpui-web 0.3.2` shipped that way and no wasm build could resolve it.
+    """
+    for source in sorted(crate.rglob("*.rs")):
+        for match in INCLUDE.finditer(source.read_text()):
+            target = (source.parent / match.group(1)).resolve()
+            if not target.is_relative_to(crate):
+                yield source, match.group(1), target
+
+
+def vendor_includes(crate, root, dry):
+    """Copy what those macros reach into the crate, and repoint them at it.
+
+    The copy keeps its path from the repo root (`assets/fonts/…`), so a file
+    pulled in by several crates lands at the same place in each and nothing
+    collides.
+    """
+    copied = set()
+    for source, literal, target in escaping_includes(crate):
+        dest = crate / target.relative_to(root)
+        rel = Path(os.path.relpath(dest, source.parent)).as_posix()
+        if dest not in copied:
+            print(f"    vendor {target.relative_to(root)}")
+            copied.add(dest)
+            if not dry:
+                dest.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(target, dest)
+        if not dry:
+            source.write_text(source.read_text().replace(f'"{literal}"', f'"{rel}"'))
+    return len(copied)
 
 
 def strip_dev_deps(text):
@@ -298,11 +341,21 @@ def main():
         if not dry:
             manifest.write_text(new)
             readme.write_text(f"{header}\n{body}" if MARKER not in body else body)
+        vendor_includes(manifest.parent, root, dry)
 
     root_manifest = root / "Cargo.toml"
     new_root = rewrite_root(root_manifest.read_text(), sorted(crates), version, outside)
     if not dry:
         root_manifest.write_text(new_root)
+
+    # The tarball is the thing that ships, so the invariant is checked against
+    # what the tarball will hold rather than trusted to the step above.
+    if not dry:
+        escaped = [f"{name}: {lit}" for name, manifest in sorted(crates.items())
+                   for _, lit, _ in escaping_includes(manifest.parent)]
+        if escaped:
+            sys.exit("include! escapes its package after vendoring:\n  "
+                     + "\n  ".join(escaped))
 
     print("\npublish order:")
     for i, name in enumerate(publish_order(edges), 1):

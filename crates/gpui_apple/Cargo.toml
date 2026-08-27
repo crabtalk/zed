@@ -1,6 +1,6 @@
 [package]
 name = "bezel-gpui-apple"
-version = "0.3.3+zed.d9ad6a"
+version = "0.3.4+zed.d9ad6a"
 description = "gpui_apple from zed-industries/zed, republished for the bezel gpui fork"
 readme = "README.md"
 repository = "https://github.com/crabtalk/zed"

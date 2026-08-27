@@ -6244,6 +6244,14 @@ impl Window {
         self.platform_window.gpu_specs()
     }
 
+    /// How long the GPU has spent on this window's frames since it opened — a
+    /// counter to take differences of, like the CPU time `getrusage` reports.
+    /// It lags the frame being drawn now, which the renderer submits rather
+    /// than waits on. `None` on every backend but Metal.
+    pub fn gpu_time(&self) -> Option<Duration> {
+        self.platform_window.gpu_time()
+    }
+
     /// Perform titlebar double-click action.
     /// This is macOS specific.
     pub fn titlebar_double_click(&self) {

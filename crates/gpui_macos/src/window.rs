@@ -1908,6 +1908,10 @@ impl PlatformWindow for MacWindow {
         this.renderer.draw(scene);
     }
 
+    fn gpu_time(&self) -> Option<std::time::Duration> {
+        self.0.lock().renderer.gpu_time()
+    }
+
     fn sprite_atlas(&self) -> Arc<dyn PlatformAtlas> {
         self.0.lock().renderer.sprite_atlas().clone()
     }

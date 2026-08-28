@@ -762,9 +762,12 @@ impl MetalRenderer {
                     metal::MTLOrigin { x: 0, y: 0, z: 0 },
                 );
                 blit.end_encoding();
-                {
+                // Liquid glass asks for no frost, and a full-screen gaussian
+                // whose output the shader then mixes away is a pass per glass
+                // element for nothing — hand it the snapshot instead.
+                let frosted = if blur.blur_radius.0 > 0. {
                     use metal::foreign_types::ForeignType as _;
-                    let kernel = self.ensure_gaussian_kernel(blur.blur_radius.0.max(1.0));
+                    let kernel = self.ensure_gaussian_kernel(blur.blur_radius.0);
                     unsafe {
                         let _: () = msg_send![
                             kernel,
@@ -773,7 +776,10 @@ impl MetalRenderer {
                             destinationTexture: blurred.as_ptr() as *mut objc::runtime::Object
                         ];
                     }
-                }
+                    blurred
+                } else {
+                    scratch.clone()
+                };
                 // `None` clear color = load the existing framebuffer, so the
                 // pass resumes over what was already painted.
                 command_encoder =
@@ -782,7 +788,8 @@ impl MetalRenderer {
                     blur_index,
                     instance_bindings,
                     viewport_size,
-                    &blurred,
+                    &frosted,
+                    &scratch,
                     command_encoder,
                 );
             }
@@ -997,6 +1004,7 @@ impl MetalRenderer {
         instance_bindings: &InstanceBindings,
         viewport_size: Size<DevicePixels>,
         source_texture: &metal::TextureRef,
+        sharp_texture: &metal::TextureRef,
         command_encoder: &metal::RenderCommandEncoderRef,
     ) {
         command_encoder.set_render_pipeline_state(&self.backdrop_blur_pipeline_state);
@@ -1028,6 +1036,12 @@ impl MetalRenderer {
         command_encoder.set_fragment_texture(
             BackdropBlurInputIndex::SourceTexture as u64,
             Some(source_texture),
+        );
+        // The same snapshot before the gaussian: a glass edge bends a sharp
+        // image, and only the interior is frosted.
+        command_encoder.set_fragment_texture(
+            BackdropBlurInputIndex::SharpTexture as u64,
+            Some(sharp_texture),
         );
 
         command_encoder.draw_primitives_instanced_base_instance(
@@ -1824,6 +1838,7 @@ enum BackdropBlurInputIndex {
     Blurs = 1,
     ViewportSize = 2,
     SourceTexture = 3,
+    SharpTexture = 4,
 }
 
 #[repr(C)]

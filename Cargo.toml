@@ -265,7 +265,7 @@ members = [
 default-members = ["crates/zed"]
 
 [workspace.package]
-version = "0.3.4+zed.d9ad6a"
+version = "0.3.5+zed.d9ad6a"
 publish = false
 edition = "2024"
 
@@ -306,7 +306,7 @@ cloud_llm_client = { path = "crates/cloud_llm_client" }
 codestral = { path = "crates/codestral" }
 collab = { path = "crates/collab" }
 collab_ui = { path = "crates/collab_ui" }
-collections = { package = "bezel-zed-collections", path = "crates/collections", version = "0.3.4+zed.d9ad6a" }
+collections = { package = "bezel-zed-collections", path = "crates/collections", version = "0.3.5+zed.d9ad6a" }
 command_palette = { path = "crates/command_palette" }
 command_palette_hooks = { path = "crates/command_palette_hooks" }
 compliance = { path = "tooling/compliance" }
@@ -325,7 +325,7 @@ debug_adapter_extension = { path = "crates/debug_adapter_extension" }
 debugger_tools = { path = "crates/debugger_tools" }
 debugger_ui = { path = "crates/debugger_ui" }
 deepseek = { path = "crates/deepseek" }
-derive_refineable = { package = "bezel-zed-derive-refineable", path = "crates/refineable/derive_refineable", version = "0.3.4+zed.d9ad6a" }
+derive_refineable = { package = "bezel-zed-derive-refineable", path = "crates/refineable/derive_refineable", version = "0.3.5+zed.d9ad6a" }
 dev_container = { path = "crates/dev_container" }
 diagnostics = { path = "crates/diagnostics" }
 edit_prediction = { path = "crates/edit_prediction" }
@@ -355,22 +355,22 @@ git_ui = { path = "crates/git_ui" }
 git_ui_core = { path = "crates/git_ui_core" }
 go_to_line = { path = "crates/go_to_line" }
 google_ai = { path = "crates/google_ai" }
-gpui = { package = "bezel-gpui", path = "crates/gpui", default-features = false, version = "0.3.4+zed.d9ad6a" }
-gpui_apple = { package = "bezel-gpui-apple", path = "crates/gpui_apple", version = "0.3.4+zed.d9ad6a" }
-gpui_linux = { package = "bezel-gpui-linux", path = "crates/gpui_linux", default-features = false, version = "0.3.4+zed.d9ad6a" }
-gpui_macos = { package = "bezel-gpui-macos", path = "crates/gpui_macos", default-features = false, version = "0.3.4+zed.d9ad6a" }
-gpui_macros = { package = "bezel-gpui-macros", path = "crates/gpui_macros", version = "0.3.4+zed.d9ad6a" }
-gpui_platform = { package = "bezel-gpui-platform", path = "crates/gpui_platform", default-features = false, version = "0.3.4+zed.d9ad6a" }
-gpui_shared_string = { package = "bezel-gpui-shared-string", path = "crates/gpui_shared_string", version = "0.3.4+zed.d9ad6a" }
+gpui = { package = "bezel-gpui", path = "crates/gpui", default-features = false, version = "0.3.5+zed.d9ad6a" }
+gpui_apple = { package = "bezel-gpui-apple", path = "crates/gpui_apple", version = "0.3.5+zed.d9ad6a" }
+gpui_linux = { package = "bezel-gpui-linux", path = "crates/gpui_linux", default-features = false, version = "0.3.5+zed.d9ad6a" }
+gpui_macos = { package = "bezel-gpui-macos", path = "crates/gpui_macos", default-features = false, version = "0.3.5+zed.d9ad6a" }
+gpui_macros = { package = "bezel-gpui-macros", path = "crates/gpui_macros", version = "0.3.5+zed.d9ad6a" }
+gpui_platform = { package = "bezel-gpui-platform", path = "crates/gpui_platform", default-features = false, version = "0.3.5+zed.d9ad6a" }
+gpui_shared_string = { package = "bezel-gpui-shared-string", path = "crates/gpui_shared_string", version = "0.3.5+zed.d9ad6a" }
 gpui_tokio = { path = "crates/gpui_tokio" }
-gpui_util = { package = "bezel-gpui-util", path = "crates/gpui_util", version = "0.3.4+zed.d9ad6a" }
-gpui_web = { package = "bezel-gpui-web", path = "crates/gpui_web", version = "0.3.4+zed.d9ad6a" }
-gpui_wgpu = { package = "bezel-gpui-wgpu", path = "crates/gpui_wgpu", version = "0.3.4+zed.d9ad6a" }
-gpui_windows = { package = "bezel-gpui-windows", path = "crates/gpui_windows", default-features = false, version = "0.3.4+zed.d9ad6a" }
+gpui_util = { package = "bezel-gpui-util", path = "crates/gpui_util", version = "0.3.5+zed.d9ad6a" }
+gpui_web = { package = "bezel-gpui-web", path = "crates/gpui_web", version = "0.3.5+zed.d9ad6a" }
+gpui_wgpu = { package = "bezel-gpui-wgpu", path = "crates/gpui_wgpu", version = "0.3.5+zed.d9ad6a" }
+gpui_windows = { package = "bezel-gpui-windows", path = "crates/gpui_windows", default-features = false, version = "0.3.5+zed.d9ad6a" }
 grammars = { path = "crates/grammars" }
 html_to_markdown = { path = "crates/html_to_markdown" }
-http_client = { package = "bezel-zed-http-client", path = "crates/http_client", version = "0.3.4+zed.d9ad6a" }
-http_client_tls = { package = "bezel-zed-http-client-tls", path = "crates/http_client_tls", version = "0.3.4+zed.d9ad6a" }
+http_client = { package = "bezel-zed-http-client", path = "crates/http_client", version = "0.3.5+zed.d9ad6a" }
+http_client_tls = { package = "bezel-zed-http-client-tls", path = "crates/http_client_tls", version = "0.3.5+zed.d9ad6a" }
 http_proxy = { path = "crates/http_proxy" }
 icons = { path = "crates/icons" }
 image_viewer = { path = "crates/image_viewer" }
@@ -400,7 +400,7 @@ lsp = { path = "crates/lsp" }
 lsp_locations = { path = "crates/lsp_locations" }
 markdown = { path = "crates/markdown" }
 markdown_preview = { path = "crates/markdown_preview" }
-media = { package = "bezel-zed-media", path = "crates/media", version = "0.3.4+zed.d9ad6a" }
+media = { package = "bezel-zed-media", path = "crates/media", version = "0.3.5+zed.d9ad6a" }
 menu = { path = "crates/menu" }
 mermaid_render = { path = "crates/mermaid_render" }
 migrator = { path = "crates/migrator" }
@@ -421,9 +421,9 @@ opencode = { path = "crates/opencode" }
 outline = { path = "crates/outline" }
 outline_panel = { path = "crates/outline_panel" }
 panel = { path = "crates/panel" }
-path = { package = "bezel-zed-path", path = "crates/path", version = "0.3.4+zed.d9ad6a" }
+path = { package = "bezel-zed-path", path = "crates/path", version = "0.3.5+zed.d9ad6a" }
 paths = { path = "crates/paths" }
-perf = { package = "bezel-zed-perf", path = "tooling/perf", version = "0.3.4+zed.d9ad6a" }
+perf = { package = "bezel-zed-perf", path = "tooling/perf", version = "0.3.5+zed.d9ad6a" }
 picker = { path = "crates/picker" }
 picker_preview = { path = "crates/picker_preview" }
 platform_title_bar = { path = "crates/platform_title_bar" }
@@ -435,18 +435,18 @@ prompt_store = { path = "crates/prompt_store" }
 proto = { path = "crates/proto" }
 proxy_handshake = { path = "crates/proxy_handshake" }
 recent_projects = { path = "crates/recent_projects" }
-refineable = { package = "bezel-zed-refineable", path = "crates/refineable", version = "0.3.4+zed.d9ad6a" }
+refineable = { package = "bezel-zed-refineable", path = "crates/refineable", version = "0.3.5+zed.d9ad6a" }
 release_channel = { path = "crates/release_channel" }
 remote = { path = "crates/remote" }
 remote_connection = { path = "crates/remote_connection" }
 remote_server = { path = "crates/remote_server" }
 repl = { path = "crates/repl" }
-reqwest_client = { package = "bezel-zed-reqwest-client", path = "crates/reqwest_client", version = "0.3.4+zed.d9ad6a" }
+reqwest_client = { package = "bezel-zed-reqwest-client", path = "crates/reqwest_client", version = "0.3.5+zed.d9ad6a" }
 rodio = { git = "https://github.com/RustAudio/rodio", rev = "e50e726ddd0292f6ef9de0dda6b90af4ed1fb66a", features = ["wav", "playback", "wav_output", "recording"] }
 rope = { path = "crates/rope" }
 rpc = { path = "crates/rpc" }
 sandbox = { path = "crates/sandbox" }
-scheduler = { package = "bezel-zed-scheduler", path = "crates/scheduler", version = "0.3.4+zed.d9ad6a" }
+scheduler = { package = "bezel-zed-scheduler", path = "crates/scheduler", version = "0.3.5+zed.d9ad6a" }
 search = { path = "crates/search" }
 session = { path = "crates/session" }
 settings = { path = "crates/settings" }
@@ -463,7 +463,7 @@ snippets_ui = { path = "crates/snippets_ui" }
 sqlez = { path = "crates/sqlez" }
 sqlez_macros = { path = "crates/sqlez_macros" }
 streaming_diff = { path = "crates/streaming_diff" }
-sum_tree = { package = "bezel-zed-sum-tree", path = "crates/sum_tree", version = "0.3.4+zed.d9ad6a" }
+sum_tree = { package = "bezel-zed-sum-tree", path = "crates/sum_tree", version = "0.3.5+zed.d9ad6a" }
 svg_preview = { path = "crates/svg_preview" }
 syntax_theme = { path = "crates/syntax_theme" }
 system_specs = { path = "crates/system_specs" }
@@ -488,7 +488,7 @@ ui_input = { path = "crates/ui_input" }
 ui_macros = { path = "crates/ui_macros" }
 ui_prompt = { path = "crates/ui_prompt" }
 util = { path = "crates/util" }
-util_macros = { package = "bezel-zed-util-macros", path = "crates/util_macros", version = "0.3.4+zed.d9ad6a" }
+util_macros = { package = "bezel-zed-util-macros", path = "crates/util_macros", version = "0.3.5+zed.d9ad6a" }
 vim = { path = "crates/vim" }
 vim_mode_setting = { path = "crates/vim_mode_setting" }
 watch = { path = "crates/watch" }
@@ -502,10 +502,10 @@ zed_actions = { path = "crates/zed_actions" }
 zed_credentials_provider = { path = "crates/zed_credentials_provider" }
 zed_env_vars = { path = "crates/zed_env_vars" }
 zeta_prompt = { path = "crates/zeta_prompt" }
-zlog = { package = "bezel-zed-zlog", path = "crates/zlog", version = "0.3.4+zed.d9ad6a" }
+zlog = { package = "bezel-zed-zlog", path = "crates/zlog", version = "0.3.5+zed.d9ad6a" }
 zlog_settings = { path = "crates/zlog_settings" }
-ztracing = { package = "bezel-zed-ztracing", path = "crates/ztracing", version = "0.3.4+zed.d9ad6a" }
-ztracing_macro = { package = "bezel-zed-ztracing-macro", path = "crates/ztracing_macro", version = "0.3.4+zed.d9ad6a" }
+ztracing = { package = "bezel-zed-ztracing", path = "crates/ztracing", version = "0.3.5+zed.d9ad6a" }
+ztracing_macro = { package = "bezel-zed-ztracing-macro", path = "crates/ztracing_macro", version = "0.3.5+zed.d9ad6a" }
 
 #
 # External crates

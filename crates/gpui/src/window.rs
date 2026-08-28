@@ -1369,6 +1369,22 @@ fn default_bounds(display_id: Option<DisplayId>, cx: &mut App) -> WindowBounds {
     window_bounds_ctor(Bounds::new(final_origin, base_size))
 }
 
+/// What a backdrop blur paints: the frost, the lens over it, and its tint.
+/// A struct rather than arguments so a new knob does not change every caller.
+#[derive(Debug, Clone, Copy)]
+pub struct GlassEffect {
+    /// Gaussian sigma applied to the snapshot. Zero skips the blur entirely.
+    pub blur_radius: Pixels,
+    /// How deep the lens profile reaches in from the rim. Zero paints flat.
+    pub lens: Pixels,
+    /// Displacement amplitude; signed, so its sign picks the direction.
+    pub magnify: f32,
+    /// Per-channel spread of the displacement — the chromatic fringe.
+    pub dispersion: f32,
+    /// Composited over the blur, additively.
+    pub tint: Hsla,
+}
+
 impl Window {
     pub(crate) fn new(
         handle: AnyWindowHandle,
@@ -4238,20 +4254,29 @@ impl Window {
     }
 
     /// Paint a within-window backdrop blur: everything already painted
-    /// beneath `bounds` is snapshotted and painted back gaussian-blurred
-    /// inside the rounded rect (frosted-glass popovers). macOS Metal only —
-    /// other renderers ignore it, so callers keep a translucent fill over it
-    /// and the fallback is merely unblurred. Content painted AFTER this call
-    /// composites on top of the blur.
+    /// beneath `bounds` is snapshotted and painted back through [`GlassEffect`]
+    /// inside the rounded rect. macOS Metal only — other renderers ignore it,
+    /// so callers keep a fill of their own and the fallback is merely flat.
+    /// Content painted AFTER this call composites on top.
     pub fn paint_backdrop_blur(
         &mut self,
         bounds: Bounds<Pixels>,
         corner_radii: Corners<Pixels>,
-        blur_radius: Pixels,
+        glass: GlassEffect,
     ) {
         self.invalidator.debug_assert_paint();
         let scale_factor = self.scale_factor();
         let content_mask = self.content_mask().scale(scale_factor);
+        // A radius past half the box makes `quad_sdf` read every fragment as
+        // outside, and the whole region discards — a `rounded_full` pill would
+        // paint no glass at all.
+        let limit = bounds.size.width.min(bounds.size.height) / 2.;
+        let corner_radii = Corners {
+            top_left: corner_radii.top_left.min(limit),
+            top_right: corner_radii.top_right.min(limit),
+            bottom_right: corner_radii.bottom_right.min(limit),
+            bottom_left: corner_radii.bottom_left.min(limit),
+        };
         // Invisible splitter primitive: forces a batch boundary at this order
         // so the renderer can break its render pass exactly here.
         self.next_frame.scene.insert_primitive(Shadow {
@@ -4268,10 +4293,15 @@ impl Window {
         });
         self.next_frame.scene.insert_backdrop_blur(BackdropBlur {
             order: 0,
-            blur_radius: blur_radius.scale(scale_factor),
+            blur_radius: glass.blur_radius.scale(scale_factor),
             bounds: bounds.scale(scale_factor),
             content_mask,
             corner_radii: corner_radii.scale(scale_factor),
+            lens: glass.lens.scale(scale_factor),
+            magnify: glass.magnify,
+            dispersion: glass.dispersion,
+            tint: glass.tint,
+            hairline: px(1.).scale(scale_factor),
         });
     }
 

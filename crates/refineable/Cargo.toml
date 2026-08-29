@@ -1,6 +1,6 @@
 [package]
 name = "bezel-zed-refineable"
-version = "0.3.4+zed.d9ad6a"
+version = "0.3.5+zed.d9ad6a"
 readme = "README.md"
 repository = "https://github.com/crabtalk/zed"
 edition.workspace = true

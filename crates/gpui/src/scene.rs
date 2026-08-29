@@ -604,6 +604,18 @@ pub struct BackdropBlur {
     pub bounds: Bounds<ScaledPixels>,
     pub content_mask: ContentMask<ScaledPixels>,
     pub corner_radii: Corners<ScaledPixels>,
+    /// How deep the lens profile reaches in from the rim; 0 paints a flat frost.
+    pub lens: ScaledPixels,
+    /// Displacement amplitude. Signed: positive samples toward the centre, so
+    /// the interior magnifies and what it displaces compresses at the rim;
+    /// negative inverts that.
+    pub magnify: f32,
+    /// Per-channel spread of the displacement — the chromatic fringe.
+    pub dispersion: f32,
+    /// Tint composited over the blur. Transparent leaves the blur bare.
+    pub tint: Hsla,
+    /// Width of the lit edge. One logical pixel, in device pixels.
+    pub hairline: ScaledPixels,
 }
 
 #[derive(Debug, Copy, Clone)]

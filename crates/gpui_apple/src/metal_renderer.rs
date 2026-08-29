@@ -7,7 +7,7 @@ use cocoa::{
     quartzcore::AutoresizingMask,
 };
 use gpui::{
-    AtlasTextureId, Background, Bounds, ContentMask, DevicePixels, DrawOrder, PaintSurface, Path,
+    AtlasTextureId, Background, Bounds, ContentMask, DevicePixels, PaintSurface, Path,
     Point, PrimitiveBatch, ScaledPixels, Scene, Size, point, size,
 };
 #[cfg(any(test, feature = "test-support"))]
@@ -740,7 +740,7 @@ impl MetalRenderer {
             // paint the blurred region back before continuing.
             while pending_blurs
                 .peek()
-                .is_some_and(|(_, blur)| blur.order <= batch_first_order(scene, &batch))
+                .is_some_and(|(_, blur)| blur.order <= scene.batch_first_order(&batch))
             {
                 let (blur_index, blur) = pending_blurs.next().unwrap();
                 command_encoder.end_encoding();
@@ -1573,23 +1573,6 @@ fn build_pipeline_state_no_blend(
 
 /// The draw order of a batch's first primitive — where the backdrop-blur
 /// interleave check anchors.
-fn batch_first_order(scene: &Scene, batch: &PrimitiveBatch) -> DrawOrder {
-    match batch {
-        PrimitiveBatch::Shadows(range) => scene.shadows[range.start].order,
-        PrimitiveBatch::Quads(range) => scene.quads[range.start].order,
-        PrimitiveBatch::Paths(range) => scene.paths[range.start].order,
-        PrimitiveBatch::Underlines(range) => scene.underlines[range.start].order,
-        PrimitiveBatch::MonochromeSprites { range, .. } => {
-            scene.monochrome_sprites[range.start].order
-        }
-        PrimitiveBatch::SubpixelSprites { range, .. } => scene.subpixel_sprites[range.start].order,
-        PrimitiveBatch::PolychromeSprites { range, .. } => {
-            scene.polychrome_sprites[range.start].order
-        }
-        PrimitiveBatch::Surfaces(range) => scene.surfaces[range.start].order,
-    }
-}
-
 fn build_path_sprite_pipeline_state(
     device: &metal::DeviceRef,
     library: &metal::LibraryRef,

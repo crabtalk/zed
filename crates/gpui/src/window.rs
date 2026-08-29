@@ -4255,8 +4255,8 @@ impl Window {
 
     /// Paint a within-window backdrop blur: everything already painted
     /// beneath `bounds` is snapshotted and painted back through [`GlassEffect`]
-    /// inside the rounded rect. macOS Metal only — other renderers ignore it,
-    /// so callers keep a fill of their own and the fallback is merely flat.
+    /// inside the rounded rect. Metal and wgpu implement it; a renderer without
+    /// it ignores the call, so callers keep a fill of their own.
     /// Content painted AFTER this call composites on top.
     pub fn paint_backdrop_blur(
         &mut self,

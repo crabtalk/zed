@@ -1,6 +1,6 @@
 [package]
 name = "bezel-gpui-macos"
-version = "0.3.0+zed.bc538d"
+version = "0.3.1+zed.d9ad6a"
 description = "gpui_macos from zed-industries/zed, republished for the bezel gpui fork"
 readme = "README.md"
 repository = "https://github.com/crabtalk/zed"

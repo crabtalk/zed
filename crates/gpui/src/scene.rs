@@ -614,9 +614,8 @@ impl From<Underline> for Primitive {
 
 /// A within-window backdrop blur region: the renderer snapshots everything
 /// painted below this order and paints it back gaussian-blurred inside the
-/// rounded bounds (frosted-glass popovers). Metal and wgpu both read it, but
-/// wgpu does not apply `blur_radius` yet, so frost there comes back sharp —
-/// see [`crate::Window::paint_backdrop_blur`].
+/// rounded bounds (frosted-glass popovers). Implemented by the Metal and wgpu
+/// renderers — see [`crate::Window::paint_backdrop_blur`].
 #[derive(Debug, Copy, Clone)]
 #[repr(C)]
 #[expect(missing_docs)]

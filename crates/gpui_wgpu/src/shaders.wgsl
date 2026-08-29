@@ -1508,3 +1508,73 @@ fn vs_backdrop_blit(@builtin(vertex_index) vertex_id: u32) -> BackdropBlitVaryin
 fn fs_backdrop_blit(input: BackdropBlitVarying) -> @location(0) vec4<f32> {
     return textureSampleLevel(t_backdrop_sharp, s_backdrop, input.uv, 0.0);
 }
+
+// --- Backdrop gaussian -------------------------------------------------------
+// Metal hands this to MPSImageGaussianBlur; wgpu has no equivalent and WebGL2
+// has no compute, so it runs as three fragment passes at reduced resolution:
+// downsample, horizontal, vertical. Sigma rides the instance transport — the
+// pass draws with `instance_index` set to the blur's own index.
+
+const BACKDROP_DOWNSAMPLE: f32 = 4.0;
+/// Ceiling on the half-kernel, in reduced-resolution texels. A true gaussian
+/// wants 3 sigma; past this the tail is clipped rather than the loop unbounded.
+const BACKDROP_MAX_TAPS: i32 = 64;
+
+struct BackdropGaussVarying {
+    @builtin(position) position: vec4<f32>,
+    @location(0) uv: vec2<f32>,
+    @location(1) @interpolate(flat) blur_id: u32,
+}
+
+@vertex
+fn vs_backdrop_gauss(@builtin(vertex_index) vertex_id: u32, @builtin(instance_index) instance_id: u32) -> BackdropGaussVarying {
+    let unit_vertex = vec2<f32>(f32(vertex_id & 1u), 0.5 * f32(vertex_id & 2u));
+    var out: BackdropGaussVarying;
+    out.position = vec4<f32>(unit_vertex * vec2<f32>(2.0, -2.0) + vec2<f32>(-1.0, 1.0), 0.0, 1.0);
+    out.uv = unit_vertex;
+    out.blur_id = instance_id;
+    return out;
+}
+
+@fragment
+fn fs_backdrop_downsample(input: BackdropGaussVarying) -> @location(0) vec4<f32> {
+    // Four bilinear taps, each averaging a 2x2 of the full-resolution snapshot,
+    // so one reduced texel carries the 4x4 block it stands for. Point sampling
+    // here is what ghosts on text.
+    let texel = 1.0 / globals.viewport_size;
+    var sum = textureSampleLevel(t_backdrop, s_backdrop, input.uv + vec2<f32>(-texel.x, -texel.y), 0.0);
+    sum = sum + textureSampleLevel(t_backdrop, s_backdrop, input.uv + vec2<f32>(texel.x, -texel.y), 0.0);
+    sum = sum + textureSampleLevel(t_backdrop, s_backdrop, input.uv + vec2<f32>(-texel.x, texel.y), 0.0);
+    sum = sum + textureSampleLevel(t_backdrop, s_backdrop, input.uv + vec2<f32>(texel.x, texel.y), 0.0);
+    return sum * 0.25;
+}
+
+fn backdrop_gauss(uv: vec2<f32>, blur_id: u32, axis: vec2<f32>) -> vec4<f32> {
+    let blur = load_backdrop_blur(blur_id);
+    // Sigma is given in full-resolution device pixels; one step here is one
+    // texel of the reduced target, which is `BACKDROP_DOWNSAMPLE` of those.
+    let sigma = max(blur.blur_radius / BACKDROP_DOWNSAMPLE, 1e-3);
+    let step_uv = axis * BACKDROP_DOWNSAMPLE / globals.viewport_size;
+    let radius = min(i32(ceil(sigma * 3.0)), BACKDROP_MAX_TAPS);
+
+    var total = textureSampleLevel(t_backdrop, s_backdrop, uv, 0.0);
+    var weight_sum = 1.0;
+    for (var i = 1; i <= radius; i = i + 1) {
+        let offset = step_uv * f32(i);
+        let weight = exp(-0.5 * f32(i) * f32(i) / (sigma * sigma));
+        total = total + textureSampleLevel(t_backdrop, s_backdrop, uv + offset, 0.0) * weight;
+        total = total + textureSampleLevel(t_backdrop, s_backdrop, uv - offset, 0.0) * weight;
+        weight_sum = weight_sum + 2.0 * weight;
+    }
+    return total / weight_sum;
+}
+
+@fragment
+fn fs_backdrop_gauss_h(input: BackdropGaussVarying) -> @location(0) vec4<f32> {
+    return backdrop_gauss(input.uv, input.blur_id, vec2<f32>(1.0, 0.0));
+}
+
+@fragment
+fn fs_backdrop_gauss_v(input: BackdropGaussVarying) -> @location(0) vec4<f32> {
+    return backdrop_gauss(input.uv, input.blur_id, vec2<f32>(0.0, 1.0));
+}

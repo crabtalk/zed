@@ -1,8 +1,9 @@
 [package]
-name = "util_macros"
-version = "0.1.0"
+name = "bezel-zed-util-macros"
+version = "0.3.0+zed.bc538d"
+readme = "README.md"
+repository = "https://github.com/crabtalk/zed"
 edition.workspace = true
-publish = false
 license = "Apache-2.0"
 description = "Utility macros for Zed"
 
@@ -10,6 +11,7 @@ description = "Utility macros for Zed"
 workspace = true
 
 [lib]
+name = "util_macros"
 path = "src/util_macros.rs"
 proc-macro = true
 doctest = false

@@ -101,14 +101,14 @@ dependencies = [
  "anyhow",
  "async-channel 2.5.0",
  "base64 0.22.1",
+ "bezel-gpui",
+ "bezel-zed-collections",
  "buffer_diff",
  "chrono",
- "collections",
  "env_logger 0.11.8",
  "feature_flags",
  "file_icons",
  "futures 0.3.32",
- "gpui",
  "http_proxy",
  "image",
  "indoc",
@@ -147,8 +147,8 @@ dependencies = [
  "agent-client-protocol",
  "agent_servers",
  "agent_ui",
- "collections",
- "gpui",
+ "bezel-gpui",
+ "bezel-zed-collections",
  "language",
  "markdown",
  "project",
@@ -166,14 +166,15 @@ name = "action_log"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "bezel-gpui",
+ "bezel-zed-collections",
+ "bezel-zed-zlog",
  "buffer_diff",
  "clock",
- "collections",
  "ctor",
  "fs",
  "futures 0.3.32",
  "git",
- "gpui",
  "indoc",
  "language",
  "log",
@@ -186,7 +187,6 @@ dependencies = [
  "text",
  "util",
  "watch",
- "zlog",
 ]
 
 [[package]]
@@ -195,11 +195,11 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "auto_update",
+ "bezel-gpui",
  "editor",
  "extension_host",
  "fs",
  "futures 0.3.32",
- "gpui",
  "language",
  "project",
  "proto",
@@ -250,12 +250,16 @@ dependencies = [
  "assets",
  "async-channel 2.5.0",
  "async-io",
+ "bezel-gpui",
+ "bezel-zed-collections",
+ "bezel-zed-http-client",
+ "bezel-zed-reqwest-client",
+ "bezel-zed-zlog",
  "chrono",
  "client",
  "clock",
  "cloud_api_types",
  "cloud_llm_client",
- "collections",
  "context_server",
  "ctor",
  "db",
@@ -266,12 +270,10 @@ dependencies = [
  "fs",
  "futures 0.3.32",
  "git",
- "gpui",
  "gpui_tokio",
  "handlebars 4.5.0",
  "heck 0.5.0",
  "html_to_markdown",
- "http_client",
  "http_proxy",
  "indoc",
  "itertools 0.14.0",
@@ -290,7 +292,6 @@ dependencies = [
  "rand 0.9.4",
  "regex",
  "release_channel",
- "reqwest_client",
  "rust-embed",
  "sandbox",
  "schemars 1.0.4",
@@ -317,7 +318,6 @@ dependencies = [
  "watch",
  "web_search",
  "zed_env_vars",
- "zlog",
  "zstd",
 ]
 
@@ -380,17 +380,18 @@ dependencies = [
  "agent-client-protocol",
  "anyhow",
  "async-channel 2.5.0",
+ "bezel-gpui",
+ "bezel-zed-collections",
+ "bezel-zed-http-client",
+ "bezel-zed-reqwest-client",
  "chrono",
  "client",
- "collections",
  "env_logger 0.11.8",
  "feature_flags",
  "fs",
  "futures 0.3.32",
  "google_ai",
- "gpui",
  "gpui_tokio",
- "http_client",
  "indoc",
  "language_model",
  "libc",
@@ -399,7 +400,6 @@ dependencies = [
  "project",
  "release_channel",
  "remote",
- "reqwest_client",
  "serde",
  "serde_json",
  "settings",
@@ -419,11 +419,11 @@ name = "agent_settings"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "collections",
+ "bezel-gpui",
+ "bezel-zed-collections",
  "convert_case 0.11.0",
  "fs",
  "futures 0.3.32",
- "gpui",
  "language_model",
  "log",
  "paths",
@@ -443,10 +443,10 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
+ "bezel-gpui",
  "const_format",
  "fs",
  "futures 0.3.32",
- "gpui",
  "paths",
  "serde",
  "serde_json",
@@ -471,12 +471,15 @@ dependencies = [
  "async-channel 2.5.0",
  "audio",
  "base64 0.22.1",
+ "bezel-gpui",
+ "bezel-zed-collections",
+ "bezel-zed-http-client",
+ "bezel-zed-reqwest-client",
  "buffer_diff",
  "chrono",
  "client",
  "clock",
  "cloud_api_types",
- "collections",
  "command_palette_hooks",
  "component",
  "context_server",
@@ -492,11 +495,9 @@ dependencies = [
  "fuzzy",
  "git",
  "git_ui_core",
- "gpui",
  "gpui_tokio",
  "heapless",
  "html_to_markdown",
- "http_client",
  "idna",
  "image",
  "indoc",
@@ -529,7 +530,6 @@ dependencies = [
  "remote",
  "remote_connection",
  "remote_server",
- "reqwest_client",
  "rope",
  "sandbox",
  "schemars 1.0.4",
@@ -603,10 +603,10 @@ dependencies = [
 name = "ai_onboarding"
 version = "0.1.0"
 dependencies = [
+ "bezel-gpui",
  "client",
  "cloud_api_types",
  "component",
- "gpui",
  "language_model",
  "serde",
  "smallvec",
@@ -791,10 +791,10 @@ name = "anthropic"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "bezel-zed-collections",
+ "bezel-zed-http-client",
  "chrono",
- "collections",
  "futures 0.3.32",
- "http_client",
  "language_model_core",
  "log",
  "schemars 1.0.4",
@@ -949,8 +949,8 @@ name = "askpass"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "bezel-gpui",
  "futures 0.3.32",
- "gpui",
  "log",
  "net",
  "smol",
@@ -966,7 +966,7 @@ name = "assets"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "gpui",
+ "bezel-gpui",
  "rust-embed",
 ]
 
@@ -1374,10 +1374,10 @@ name = "audio"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "collections",
+ "bezel-gpui",
+ "bezel-zed-collections",
  "cpal",
  "crossbeam",
- "gpui",
  "libwebrtc",
  "log",
  "parking_lot",
@@ -1405,14 +1405,15 @@ name = "auto_update"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "bezel-gpui",
+ "bezel-zed-http-client",
+ "bezel-zed-zlog",
  "client",
  "clock",
  "ctor",
  "db",
  "futures 0.3.32",
  "futures-lite 1.13.0",
- "gpui",
- "http_client",
  "log",
  "parking_lot",
  "paths",
@@ -1426,7 +1427,6 @@ dependencies = [
  "util",
  "which 6.0.3",
  "workspace",
- "zlog",
 ]
 
 [[package]]
@@ -1449,10 +1449,10 @@ dependencies = [
  "agent_skills",
  "anyhow",
  "auto_update",
+ "bezel-gpui",
  "client",
  "db",
  "editor",
- "gpui",
  "markdown_preview",
  "notifications",
  "prompt_store",
@@ -2019,7 +2019,7 @@ version = "0.1.0"
 dependencies = [
  "aws-smithy-runtime-api",
  "aws-smithy-types",
- "http_client",
+ "bezel-zed-http-client",
 ]
 
 [[package]]
@@ -2131,8 +2131,8 @@ dependencies = [
  "anyhow",
  "aws-sdk-bedrockruntime",
  "aws-smithy-types",
+ "bezel-zed-http-client",
  "futures 0.3.32",
- "http_client",
  "schemars 1.0.4",
  "serde",
  "serde_json",
@@ -2154,11 +2154,11 @@ dependencies = [
  "agent",
  "agent_settings",
  "assets",
+ "bezel-gpui",
+ "bezel-gpui-platform",
  "criterion",
  "editor",
  "futures 0.3.32",
- "gpui",
- "gpui_platform",
  "itertools 0.14.0",
  "language",
  "language_model",
@@ -2177,6 +2177,496 @@ dependencies = [
  "util",
  "zed_actions",
 ]
+
+[[package]]
+name = "bezel-gpui"
+version = "0.3.0+zed.bc538d"
+dependencies = [
+ "accesskit",
+ "anyhow",
+ "async-channel 2.5.0",
+ "async-task",
+ "backtrace",
+ "bezel-gpui-macros",
+ "bezel-gpui-shared-string",
+ "bezel-gpui-util",
+ "bezel-zed-collections",
+ "bezel-zed-http-client",
+ "bezel-zed-media",
+ "bezel-zed-refineable",
+ "bezel-zed-scheduler",
+ "bezel-zed-sum-tree",
+ "bezel-zed-util-macros",
+ "bezel-zed-ztracing",
+ "bindgen 0.71.1",
+ "bitflags 2.13.1",
+ "block",
+ "cbindgen",
+ "chrono",
+ "cocoa 0.26.0",
+ "cocoa-foundation 0.2.0",
+ "core-foundation 0.10.0",
+ "core-foundation-sys",
+ "core-graphics 0.24.0",
+ "core-text",
+ "core-video",
+ "criterion",
+ "ctor",
+ "derive_more",
+ "embed-resource",
+ "etagere",
+ "foreign-types 0.5.0",
+ "futures 0.3.32",
+ "futures-concurrency",
+ "getrandom 0.3.4",
+ "hdrhistogram",
+ "heapless",
+ "image",
+ "inventory",
+ "itertools 0.14.0",
+ "log",
+ "lyon",
+ "mach2 0.5.0",
+ "metal",
+ "num_cpus",
+ "objc",
+ "objc2 0.6.3",
+ "objc2-metal 0.3.2",
+ "parking",
+ "parking_lot",
+ "pathfinder_geometry",
+ "pin-project",
+ "pollster 0.4.0",
+ "postage",
+ "profiling",
+ "rand 0.9.4",
+ "raw-window-handle",
+ "regex",
+ "resvg",
+ "schemars 1.0.4",
+ "seahash",
+ "serde",
+ "serde_json",
+ "slotmap",
+ "smallvec",
+ "spin 0.10.0",
+ "stacksafe",
+ "strum 0.27.2",
+ "taffy",
+ "thiserror 2.0.17",
+ "tracing",
+ "ttf-parser",
+ "url",
+ "usvg",
+ "uuid",
+ "waker-fn",
+ "web-time",
+ "windows 0.61.3",
+ "zed-font-kit",
+ "zed-scap",
+]
+
+[[package]]
+name = "bezel-gpui-apple"
+version = "0.3.0+zed.bc538d"
+dependencies = [
+ "anyhow",
+ "bezel-gpui",
+ "bezel-zed-collections",
+ "block",
+ "cbindgen",
+ "cocoa 0.26.0",
+ "core-foundation 0.10.0",
+ "core-video",
+ "derive_more",
+ "etagere",
+ "foreign-types 0.5.0",
+ "image",
+ "log",
+ "metal",
+ "objc",
+ "parking_lot",
+]
+
+[[package]]
+name = "bezel-gpui-linux"
+version = "0.3.0+zed.bc538d"
+dependencies = [
+ "accesskit",
+ "accesskit_unix",
+ "anyhow",
+ "as-raw-xcb-connection",
+ "ashpd",
+ "bezel-gpui",
+ "bezel-gpui-util",
+ "bezel-gpui-wgpu",
+ "bezel-zed-collections",
+ "bezel-zed-http-client",
+ "bitflags 2.13.1",
+ "bytemuck",
+ "calloop",
+ "calloop-wayland-source",
+ "filedescriptor",
+ "futures 0.3.32",
+ "image",
+ "itertools 0.14.0",
+ "libc",
+ "log",
+ "notify-rust",
+ "oo7",
+ "open",
+ "parking_lot",
+ "pathfinder_geometry",
+ "pollster 0.4.0",
+ "profiling",
+ "raw-window-handle",
+ "smallvec",
+ "smol",
+ "strum 0.27.2",
+ "swash",
+ "url",
+ "uuid",
+ "wayland-backend",
+ "wayland-client",
+ "wayland-cursor",
+ "wayland-protocols",
+ "wayland-protocols-plasma",
+ "wayland-protocols-wlr",
+ "x11-clipboard",
+ "x11rb",
+ "xkbcommon",
+ "zed-scap",
+ "zed-xim",
+]
+
+[[package]]
+name = "bezel-gpui-macos"
+version = "0.3.0+zed.bc538d"
+dependencies = [
+ "accesskit",
+ "accesskit_macos",
+ "anyhow",
+ "async-task",
+ "bezel-gpui",
+ "bezel-gpui-apple",
+ "bezel-gpui-util",
+ "bezel-zed-collections",
+ "bezel-zed-media",
+ "block",
+ "block2 0.6.2",
+ "cocoa 0.26.0",
+ "core-foundation 0.10.0",
+ "core-foundation-sys",
+ "core-graphics 0.24.0",
+ "core-text",
+ "ctor",
+ "dispatch2",
+ "foreign-types 0.5.0",
+ "futures 0.3.32",
+ "image",
+ "itertools 0.14.0",
+ "libc",
+ "log",
+ "mach2 0.5.0",
+ "metal",
+ "objc",
+ "objc2 0.6.3",
+ "objc2-app-kit 0.3.2",
+ "objc2-foundation 0.3.2",
+ "objc2-user-notifications",
+ "parking_lot",
+ "pathfinder_geometry",
+ "raw-window-handle",
+ "semver",
+ "smallvec",
+ "strum 0.27.2",
+ "uuid",
+ "zed-font-kit",
+]
+
+[[package]]
+name = "bezel-gpui-macros"
+version = "0.3.0+zed.bc538d"
+dependencies = [
+ "heck 0.5.0",
+ "proc-macro2",
+ "quote",
+ "syn 2.0.117",
+]
+
+[[package]]
+name = "bezel-gpui-platform"
+version = "0.3.0+zed.bc538d"
+dependencies = [
+ "bezel-gpui",
+ "bezel-gpui-linux",
+ "bezel-gpui-macos",
+ "bezel-gpui-web",
+ "bezel-gpui-windows",
+ "bezel-zed-reqwest-client",
+ "console_error_panic_hook",
+]
+
+[[package]]
+name = "bezel-gpui-shared-string"
+version = "0.3.0+zed.bc538d"
+dependencies = [
+ "schemars 1.0.4",
+ "serde",
+ "smol_str",
+]
+
+[[package]]
+name = "bezel-gpui-util"
+version = "0.3.0+zed.bc538d"
+dependencies = [
+ "anyhow",
+ "log",
+ "which 6.0.3",
+]
+
+[[package]]
+name = "bezel-gpui-web"
+version = "0.3.0+zed.bc538d"
+dependencies = [
+ "anyhow",
+ "bezel-gpui",
+ "bezel-gpui-wgpu",
+ "bezel-zed-http-client",
+ "console_error_panic_hook",
+ "futures 0.3.32",
+ "js-sys",
+ "log",
+ "parking_lot",
+ "raw-window-handle",
+ "uuid",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
+ "web-sys",
+ "web-time",
+]
+
+[[package]]
+name = "bezel-gpui-wgpu"
+version = "0.3.0+zed.bc538d"
+dependencies = [
+ "anyhow",
+ "bezel-gpui",
+ "bezel-gpui-util",
+ "bezel-zed-collections",
+ "bytemuck",
+ "cosmic-text",
+ "etagere",
+ "itertools 0.14.0",
+ "js-sys",
+ "log",
+ "parking_lot",
+ "pollster 0.4.0",
+ "profiling",
+ "raw-window-handle",
+ "smallvec",
+ "swash",
+ "unicode-bidi",
+ "unicode-segmentation",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
+ "web-sys",
+ "wgpu",
+ "zed-font-kit",
+]
+
+[[package]]
+name = "bezel-gpui-windows"
+version = "0.3.0+zed.bc538d"
+dependencies = [
+ "accesskit",
+ "accesskit_windows",
+ "anyhow",
+ "bezel-gpui",
+ "bezel-gpui-util",
+ "bezel-zed-collections",
+ "dunce",
+ "etagere",
+ "futures 0.3.32",
+ "image",
+ "itertools 0.14.0",
+ "log",
+ "parking_lot",
+ "rand 0.9.4",
+ "raw-window-handle",
+ "smallvec",
+ "uuid",
+ "windows 0.61.3",
+ "windows-core 0.61.2",
+ "windows-numerics 0.2.0",
+ "windows-registry 0.5.3",
+ "zed-scap",
+]
+
+[[package]]
+name = "bezel-zed-collections"
+version = "0.3.0+zed.bc538d"
+dependencies = [
+ "bezel-gpui-util",
+ "indexmap 2.14.0",
+ "rustc-hash 2.1.1",
+]
+
+[[package]]
+name = "bezel-zed-derive-refineable"
+version = "0.3.0+zed.bc538d"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.117",
+]
+
+[[package]]
+name = "bezel-zed-http-client"
+version = "0.3.0+zed.bc538d"
+dependencies = [
+ "anyhow",
+ "async-compression",
+ "async-fs",
+ "async-tar",
+ "bytes 1.11.1",
+ "derive_more",
+ "futures 0.3.32",
+ "http 1.3.1",
+ "http-body 1.0.1",
+ "log",
+ "parking_lot",
+ "serde",
+ "serde_json",
+ "serde_urlencoded",
+ "sha2",
+ "tempfile",
+ "url",
+]
+
+[[package]]
+name = "bezel-zed-http-client-tls"
+version = "0.3.0+zed.bc538d"
+dependencies = [
+ "rustls 0.23.40",
+ "rustls-platform-verifier",
+]
+
+[[package]]
+name = "bezel-zed-media"
+version = "0.3.0+zed.bc538d"
+dependencies = [
+ "anyhow",
+ "bindgen 0.71.1",
+ "core-foundation 0.10.0",
+ "core-video",
+ "ctor",
+ "foreign-types 0.5.0",
+ "metal",
+ "objc",
+]
+
+[[package]]
+name = "bezel-zed-path"
+version = "0.3.0+zed.bc538d"
+dependencies = [
+ "anyhow",
+ "dunce",
+ "serde",
+]
+
+[[package]]
+name = "bezel-zed-perf"
+version = "0.3.0+zed.bc538d"
+dependencies = [
+ "bezel-zed-collections",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "bezel-zed-refineable"
+version = "0.3.0+zed.bc538d"
+dependencies = [
+ "bezel-zed-derive-refineable",
+]
+
+[[package]]
+name = "bezel-zed-reqwest-client"
+version = "0.3.0+zed.bc538d"
+dependencies = [
+ "anyhow",
+ "bezel-gpui-util",
+ "bezel-zed-http-client",
+ "bezel-zed-http-client-tls",
+ "bytes 1.11.1",
+ "futures 0.3.32",
+ "log",
+ "regex",
+ "serde",
+ "tokio",
+ "zed-reqwest",
+]
+
+[[package]]
+name = "bezel-zed-scheduler"
+version = "0.3.0+zed.bc538d"
+dependencies = [
+ "async-task",
+ "backtrace",
+ "chrono",
+ "flume 0.12.0",
+ "futures 0.3.32",
+ "parking_lot",
+ "rand 0.9.4",
+ "web-time",
+]
+
+[[package]]
+name = "bezel-zed-sum-tree"
+version = "0.3.0+zed.bc538d"
+dependencies = [
+ "bezel-zed-ztracing",
+ "heapless",
+ "log",
+ "rayon",
+ "tracing",
+]
+
+[[package]]
+name = "bezel-zed-util-macros"
+version = "0.3.0+zed.bc538d"
+dependencies = [
+ "bezel-zed-perf",
+ "quote",
+ "syn 2.0.117",
+]
+
+[[package]]
+name = "bezel-zed-zlog"
+version = "0.3.0+zed.bc538d"
+dependencies = [
+ "anyhow",
+ "bezel-zed-collections",
+ "chrono",
+ "log",
+]
+
+[[package]]
+name = "bezel-zed-ztracing"
+version = "0.3.0+zed.bc538d"
+dependencies = [
+ "bezel-zed-zlog",
+ "bezel-zed-ztracing-macro",
+ "tracing",
+ "tracing-subscriber",
+ "tracing-tracy",
+ "tracy-client",
+]
+
+[[package]]
+name = "bezel-zed-ztracing-macro"
+version = "0.3.0+zed.bc538d"
 
 [[package]]
 name = "bigdecimal"
@@ -2449,7 +2939,7 @@ dependencies = [
 name = "breadcrumbs"
 version = "0.1.0"
 dependencies = [
- "gpui",
+ "bezel-gpui",
  "ui",
  "workspace",
 ]
@@ -2493,9 +2983,12 @@ dependencies = [
 name = "buffer_diff"
 version = "0.1.0"
 dependencies = [
+ "bezel-gpui",
+ "bezel-zed-sum-tree",
+ "bezel-zed-zlog",
+ "bezel-zed-ztracing",
  "clock",
  "ctor",
- "gpui",
  "imara-diff",
  "language",
  "log",
@@ -2503,13 +2996,10 @@ dependencies = [
  "rand 0.9.4",
  "rope",
  "settings",
- "sum_tree",
  "text",
  "tracing",
  "unindent",
  "util",
- "zlog",
- "ztracing",
 ]
 
 [[package]]
@@ -2687,12 +3177,12 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "audio",
+ "bezel-gpui",
+ "bezel-zed-collections",
  "client",
- "collections",
  "feature_flags",
  "fs",
  "futures 0.3.32",
- "gpui",
  "gpui_tokio",
  "language",
  "livekit_client",
@@ -2987,12 +3477,12 @@ name = "channel"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "bezel-gpui",
+ "bezel-zed-collections",
+ "bezel-zed-http-client",
  "client",
  "clock",
- "collections",
  "futures 0.3.32",
- "gpui",
- "http_client",
  "language",
  "log",
  "postage",
@@ -3157,10 +3647,10 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "askpass",
+ "bezel-zed-collections",
  "clap",
  "clap_complete",
  "clap_complete_nushell",
- "collections",
  "console",
  "core-foundation 0.10.0",
  "core-services",
@@ -3189,21 +3679,21 @@ dependencies = [
  "anyhow",
  "async-channel 2.5.0",
  "async-tungstenite",
+ "bezel-gpui",
+ "bezel-zed-collections",
+ "bezel-zed-http-client",
+ "bezel-zed-http-client-tls",
  "chrono",
  "clock",
  "cloud_api_client",
  "cloud_api_types",
  "cloud_llm_client",
- "collections",
  "credentials_provider",
  "derive_more",
  "feature_flags",
  "fs",
  "futures 0.3.32",
- "gpui",
  "gpui_tokio",
- "http_client",
- "http_client_tls",
  "log",
  "objc2-foundation 0.3.2",
  "parking_lot",
@@ -3253,11 +3743,11 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-lock",
+ "bezel-gpui",
+ "bezel-zed-http-client",
  "cloud_api_types",
  "futures 0.3.32",
- "gpui",
  "gpui_tokio",
- "http_client",
  "parking_lot",
  "serde",
  "serde_json",
@@ -3386,11 +3876,11 @@ name = "codestral"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "bezel-gpui",
+ "bezel-zed-http-client",
  "edit_prediction",
  "edit_prediction_types",
  "futures 0.3.32",
- "gpui",
- "http_client",
  "icons",
  "language",
  "language_model",
@@ -3415,6 +3905,10 @@ dependencies = [
  "aws-sdk-kinesis",
  "aws-sdk-s3",
  "axum",
+ "bezel-gpui",
+ "bezel-zed-collections",
+ "bezel-zed-http-client",
+ "bezel-zed-zlog",
  "buffer_diff",
  "call",
  "channel",
@@ -3424,7 +3918,6 @@ dependencies = [
  "cloud_api_types",
  "collab",
  "collab_ui",
- "collections",
  "command_palette_hooks",
  "ctor",
  "dap",
@@ -3440,10 +3933,8 @@ dependencies = [
  "git",
  "git_hosting_providers",
  "git_ui",
- "gpui",
  "gpui_tokio",
  "hex",
- "http_client",
  "indoc",
  "language",
  "language_model",
@@ -3499,7 +3990,6 @@ dependencies = [
  "workspace",
  "worktree",
  "zed_actions",
- "zlog",
 ]
 
 [[package]]
@@ -3507,15 +3997,15 @@ name = "collab_ui"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "bezel-gpui",
+ "bezel-zed-collections",
  "call",
  "channel",
  "client",
- "collections",
  "db",
  "editor",
  "futures 0.3.32",
  "fuzzy",
- "gpui",
  "livekit_client",
  "menu",
  "notifications",
@@ -3537,15 +4027,6 @@ dependencies = [
  "util",
  "workspace",
  "zed_actions",
-]
-
-[[package]]
-name = "collections"
-version = "0.1.0"
-dependencies = [
- "gpui_util",
- "indexmap 2.14.0",
- "rustc-hash 2.1.1",
 ]
 
 [[package]]
@@ -3585,14 +4066,14 @@ name = "command_palette"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "bezel-gpui",
+ "bezel-zed-collections",
  "client",
- "collections",
  "command_palette_hooks",
  "db",
  "editor",
  "fuzzy_nucleo",
  "go_to_line",
- "gpui",
  "language",
  "log",
  "menu",
@@ -3615,9 +4096,9 @@ dependencies = [
 name = "command_palette_hooks"
 version = "0.1.0"
 dependencies = [
- "collections",
+ "bezel-gpui",
+ "bezel-zed-collections",
  "derive_more",
- "gpui",
  "workspace",
 ]
 
@@ -3644,9 +4125,9 @@ dependencies = [
 name = "component"
 version = "0.1.0"
 dependencies = [
- "collections",
+ "bezel-gpui",
+ "bezel-zed-collections",
  "documented",
- "gpui",
  "inventory",
  "parking_lot",
  "strum 0.27.2",
@@ -3659,22 +4140,22 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "assets",
+ "bezel-gpui",
+ "bezel-gpui-platform",
+ "bezel-zed-collections",
+ "bezel-zed-reqwest-client",
  "client",
- "collections",
  "component",
  "db",
  "editor",
  "env_logger 0.11.8",
  "fs",
- "gpui",
- "gpui_platform",
  "language",
  "log",
  "node_runtime",
  "notifications",
  "project",
  "release_channel",
- "reqwest_client",
  "session",
  "settings",
  "theme",
@@ -3795,11 +4276,11 @@ dependencies = [
  "async-channel 2.5.0",
  "async-trait",
  "base64 0.22.1",
- "collections",
+ "bezel-gpui",
+ "bezel-zed-collections",
+ "bezel-zed-http-client",
  "futures 0.3.32",
  "futures-lite 1.13.0",
- "gpui",
- "http_client",
  "log",
  "net",
  "oauth_callback_server",
@@ -3851,14 +4332,16 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-std",
- "collections",
+ "bezel-gpui",
+ "bezel-zed-collections",
+ "bezel-zed-sum-tree",
+ "bezel-zed-zlog",
  "command_palette_hooks",
  "copilot_chat",
  "edit_prediction_types",
  "editor",
  "fs",
  "futures 0.3.32",
- "gpui",
  "icons",
  "indoc",
  "language",
@@ -3873,12 +4356,10 @@ dependencies = [
  "serde",
  "serde_json",
  "settings",
- "sum_tree",
  "theme",
  "theme_settings",
  "util",
  "workspace",
- "zlog",
 ]
 
 [[package]]
@@ -3887,11 +4368,11 @@ version = "0.1.0"
 dependencies = [
  "anthropic",
  "anyhow",
- "collections",
+ "bezel-gpui",
+ "bezel-zed-collections",
+ "bezel-zed-http-client",
  "credentials_provider",
  "futures 0.3.32",
- "gpui",
- "http_client",
  "language_model",
  "log",
  "serde",
@@ -3904,9 +4385,9 @@ name = "copilot_ui"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "bezel-gpui",
  "copilot",
  "copilot_chat",
- "gpui",
  "language",
  "log",
  "lsp",
@@ -4403,7 +4884,7 @@ name = "credentials_provider"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "gpui",
+ "bezel-gpui",
  "serde",
 ]
 
@@ -4578,10 +5059,10 @@ name = "csv_preview"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "bezel-gpui",
  "editor",
  "feature_flags",
  "fuzzy",
- "gpui",
  "log",
  "picker",
  "proptest",
@@ -4688,13 +5169,14 @@ dependencies = [
  "async-pipe",
  "async-tar",
  "async-trait",
+ "bezel-gpui",
+ "bezel-zed-collections",
+ "bezel-zed-http-client",
+ "bezel-zed-zlog",
  "client",
- "collections",
  "dap-types",
  "fs",
  "futures 0.3.32",
- "gpui",
- "http_client",
  "language",
  "libc",
  "log",
@@ -4711,7 +5193,6 @@ dependencies = [
  "task",
  "telemetry",
  "util",
- "zlog",
 ]
 
 [[package]]
@@ -4730,13 +5211,13 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-trait",
- "collections",
+ "bezel-gpui",
+ "bezel-zed-collections",
+ "bezel-zed-http-client",
  "dap",
  "dotenvy",
  "fs",
  "futures 0.3.32",
- "gpui",
- "http_client",
  "json_dotpath",
  "language",
  "log",
@@ -4926,7 +5407,7 @@ name = "db"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "gpui",
+ "bezel-gpui",
  "indoc",
  "inventory",
  "log",
@@ -4957,10 +5438,10 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-trait",
- "collections",
+ "bezel-gpui",
+ "bezel-zed-collections",
  "dap",
  "extension",
- "gpui",
  "serde_json",
  "task",
  "util",
@@ -4971,10 +5452,10 @@ name = "debugger_tools"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "bezel-gpui",
  "dap",
  "editor",
  "futures 0.3.32",
- "gpui",
  "project",
  "serde_json",
  "settings",
@@ -4988,9 +5469,11 @@ name = "debugger_ui"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "bezel-gpui",
+ "bezel-zed-collections",
+ "bezel-zed-zlog",
  "bitflags 2.13.1",
  "client",
- "collections",
  "command_palette_hooks",
  "dap",
  "dap_adapters",
@@ -5001,7 +5484,6 @@ dependencies = [
  "file_icons",
  "futures 0.3.32",
  "fuzzy",
- "gpui",
  "hex",
  "indoc",
  "itertools 0.14.0",
@@ -5036,7 +5518,6 @@ dependencies = [
  "util",
  "workspace",
  "zed_actions",
- "zlog",
 ]
 
 [[package]]
@@ -5053,8 +5534,8 @@ name = "deepseek"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "bezel-zed-http-client",
  "futures 0.3.32",
- "http_client",
  "schemars 1.0.4",
  "serde",
  "serde_json",
@@ -5152,15 +5633,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "derive_refineable"
-version = "0.1.0"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 2.0.117",
-]
-
-[[package]]
 name = "derive_setters"
 version = "0.1.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5179,12 +5651,12 @@ dependencies = [
  "anyhow",
  "async-tar",
  "async-trait",
+ "bezel-gpui",
+ "bezel-zed-http-client",
  "env_logger 0.11.8",
  "fs",
  "futures 0.3.32",
- "gpui",
  "http 1.3.1",
- "http_client",
  "indoc",
  "log",
  "menu",
@@ -5212,12 +5684,13 @@ version = "0.1.0"
 dependencies = [
  "agent_settings",
  "anyhow",
- "collections",
+ "bezel-gpui",
+ "bezel-zed-collections",
+ "bezel-zed-zlog",
  "component",
  "ctor",
  "editor",
  "futures-lite 1.13.0",
- "gpui",
  "indoc",
  "itertools 0.14.0",
  "language",
@@ -5238,7 +5711,6 @@ dependencies = [
  "util",
  "workspace",
  "zed_actions",
- "zlog",
 ]
 
 [[package]]
@@ -5363,7 +5835,8 @@ name = "docs_preprocessor"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "collections",
+ "bezel-zed-collections",
+ "bezel-zed-zlog",
  "jsonschema",
  "mdbook",
  "regex",
@@ -5374,7 +5847,6 @@ dependencies = [
  "task",
  "theme",
  "util",
- "zlog",
 ]
 
 [[package]]
@@ -5519,13 +5991,15 @@ version = "0.1.0"
 dependencies = [
  "ai_onboarding",
  "anyhow",
+ "bezel-gpui",
+ "bezel-zed-collections",
+ "bezel-zed-zlog",
  "buffer_diff",
  "client",
  "clock",
  "cloud_api_client",
  "cloud_api_types",
  "cloud_llm_client",
- "collections",
  "copilot",
  "copilot_ui",
  "credentials_provider",
@@ -5539,7 +6013,6 @@ dependencies = [
  "fs",
  "futures 0.3.32",
  "git",
- "gpui",
  "heapless",
  "indoc",
  "itertools 0.14.0",
@@ -5578,7 +6051,6 @@ dependencies = [
  "zed_actions",
  "zed_credentials_provider",
  "zeta_prompt",
- "zlog",
  "zstd",
 ]
 
@@ -5588,11 +6060,15 @@ version = "0.1.0"
 dependencies = [
  "anthropic",
  "anyhow",
+ "bezel-gpui",
+ "bezel-gpui-platform",
+ "bezel-zed-collections",
+ "bezel-zed-http-client",
+ "bezel-zed-reqwest-client",
  "chrono",
  "clap",
  "client",
  "cloud_llm_client",
- "collections",
  "db",
  "debug_adapter_extension",
  "dirs",
@@ -5604,10 +6080,7 @@ dependencies = [
  "fs",
  "futures 0.3.32",
  "gaoya",
- "gpui",
- "gpui_platform",
  "gpui_tokio",
- "http_client",
  "indoc",
  "language",
  "language_extension",
@@ -5624,7 +6097,6 @@ dependencies = [
  "prompt_store",
  "rand 0.9.4",
  "release_channel",
- "reqwest_client",
  "rust-embed",
  "serde",
  "serde_json",
@@ -5651,11 +6123,11 @@ name = "edit_prediction_context"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "bezel-gpui",
+ "bezel-zed-collections",
  "clock",
- "collections",
  "env_logger 0.11.8",
  "futures 0.3.32",
- "gpui",
  "indoc",
  "language",
  "log",
@@ -5692,8 +6164,8 @@ dependencies = [
 name = "edit_prediction_types"
 version = "0.1.0"
 dependencies = [
+ "bezel-gpui",
  "client",
- "gpui",
  "icons",
  "language",
  "text",
@@ -5704,11 +6176,12 @@ name = "edit_prediction_ui"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "bezel-gpui",
+ "bezel-zed-collections",
  "buffer_diff",
  "client",
  "cloud_llm_client",
  "codestral",
- "collections",
  "command_palette_hooks",
  "copilot",
  "copilot_chat",
@@ -5719,7 +6192,6 @@ dependencies = [
  "feature_flags",
  "fs",
  "futures 0.3.32",
- "gpui",
  "indoc",
  "language",
  "markdown",
@@ -5749,11 +6221,15 @@ dependencies = [
  "anyhow",
  "assets",
  "base64 0.22.1",
+ "bezel-gpui",
+ "bezel-zed-collections",
+ "bezel-zed-sum-tree",
+ "bezel-zed-zlog",
+ "bezel-zed-ztracing",
  "breadcrumbs",
  "buffer_diff",
  "client",
  "clock",
- "collections",
  "convert_case 0.11.0",
  "ctor",
  "dap",
@@ -5767,7 +6243,6 @@ dependencies = [
  "futures-lite 1.13.0",
  "fuzzy",
  "git",
- "gpui",
  "indoc",
  "itertools 0.14.0",
  "language",
@@ -5796,7 +6271,6 @@ dependencies = [
  "settings",
  "smallvec",
  "snippet",
- "sum_tree",
  "task",
  "telemetry",
  "text",
@@ -5826,8 +6300,6 @@ dependencies = [
  "vim_mode_setting",
  "workspace",
  "zed_actions",
- "zlog",
- "ztracing",
 ]
 
 [[package]]
@@ -5835,9 +6307,9 @@ name = "editor_benchmarks"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "bezel-gpui",
+ "bezel-gpui-platform",
  "editor",
- "gpui",
- "gpui_platform",
  "language",
  "multi_buffer",
  "project",
@@ -5961,10 +6433,10 @@ dependencies = [
 name = "encoding_selector"
 version = "0.1.0"
 dependencies = [
+ "bezel-gpui",
  "editor",
  "encoding_rs",
  "fuzzy",
- "gpui",
  "language",
  "picker",
  "project",
@@ -6051,7 +6523,7 @@ dependencies = [
 name = "env_var"
 version = "0.1.0"
 dependencies = [
- "gpui_shared_string",
+ "bezel-gpui-shared-string",
 ]
 
 [[package]]
@@ -6166,7 +6638,7 @@ name = "etw_tracing"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "gpui",
+ "bezel-gpui",
  "log",
  "net",
  "serde",
@@ -6196,6 +6668,9 @@ dependencies = [
  "agent-client-protocol",
  "agent_ui",
  "anyhow",
+ "bezel-gpui",
+ "bezel-gpui-platform",
+ "bezel-zed-reqwest-client",
  "clap",
  "client",
  "ctrlc",
@@ -6206,8 +6681,6 @@ dependencies = [
  "feature_flags",
  "fs",
  "futures 0.3.32",
- "gpui",
- "gpui_platform",
  "gpui_tokio",
  "language",
  "language_extension",
@@ -6219,7 +6692,6 @@ dependencies = [
  "project",
  "prompt_store",
  "release_channel",
- "reqwest_client",
  "serde",
  "serde_json",
  "settings",
@@ -6235,7 +6707,7 @@ dependencies = [
 name = "eval_utils"
 version = "0.1.0"
 dependencies = [
- "gpui_platform",
+ "bezel-gpui-platform",
  "serde",
  "smol",
 ]
@@ -6313,20 +6785,21 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-trait",
+ "bezel-gpui",
+ "bezel-zed-collections",
+ "bezel-zed-http-client",
+ "bezel-zed-path",
+ "bezel-zed-ztracing",
  "cloud_api_types",
- "collections",
  "dap",
  "fs",
  "futures 0.3.32",
- "gpui",
  "heck 0.5.0",
- "http_client",
  "indoc",
  "language",
  "log",
  "lsp",
  "parking_lot",
- "path",
  "pretty_assertions",
  "proto",
  "semver",
@@ -6341,7 +6814,6 @@ dependencies = [
  "wasm-encoder 0.252.0",
  "wasmparser 0.252.0",
  "which 6.0.3",
- "ztracing",
 ]
 
 [[package]]
@@ -6349,16 +6821,16 @@ name = "extension_cli"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "bezel-gpui-platform",
+ "bezel-zed-reqwest-client",
  "clap",
  "cloud_api_types",
  "env_logger 0.11.8",
  "extension",
  "fs",
  "futures 0.3.32",
- "gpui_platform",
  "language",
  "log",
- "reqwest_client",
  "serde",
  "serde_json",
  "serde_json_lenient",
@@ -6381,18 +6853,21 @@ dependencies = [
  "async-compression",
  "async-tar",
  "async-trait",
+ "bezel-gpui",
+ "bezel-zed-collections",
+ "bezel-zed-http-client",
+ "bezel-zed-reqwest-client",
+ "bezel-zed-zlog",
+ "bezel-zed-ztracing",
  "client",
  "cloud_api_types",
- "collections",
  "criterion",
  "ctor",
  "dap",
  "extension",
  "fs",
  "futures 0.3.32",
- "gpui",
  "gpui_tokio",
- "http_client",
  "language",
  "language_extension",
  "log",
@@ -6404,7 +6879,6 @@ dependencies = [
  "project",
  "release_channel",
  "remote",
- "reqwest_client",
  "semver",
  "serde",
  "serde_json",
@@ -6423,8 +6897,6 @@ dependencies = [
  "wasmparser 0.252.0",
  "wasmtime",
  "wasmtime-wasi",
- "zlog",
- "ztracing",
 ]
 
 [[package]]
@@ -6432,8 +6904,9 @@ name = "extensions_ui"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "bezel-gpui",
+ "bezel-zed-collections",
  "cloud_api_types",
- "collections",
  "command_palette_hooks",
  "component",
  "db",
@@ -6443,7 +6916,6 @@ dependencies = [
  "fs",
  "fuzzy",
  "git",
- "gpui",
  "language",
  "log",
  "num-format",
@@ -6566,10 +7038,10 @@ dependencies = [
 name = "feature_flags"
 version = "0.1.0"
 dependencies = [
- "collections",
+ "bezel-gpui",
+ "bezel-zed-collections",
  "feature_flags_macros",
  "fs",
- "gpui",
  "inventory",
  "schemars 1.0.4",
  "serde_json",
@@ -6589,9 +7061,9 @@ dependencies = [
 name = "feedback"
 version = "0.1.0"
 dependencies = [
+ "bezel-gpui",
  "client",
  "extension_host",
- "gpui",
  "system_specs",
  "urlencoding",
  "util",
@@ -6614,16 +7086,17 @@ name = "file_finder"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "bezel-gpui",
+ "bezel-zed-collections",
+ "bezel-zed-zlog",
  "channel",
  "client",
- "collections",
  "ctor",
  "editor",
  "file_icons",
  "futures 0.3.32",
  "fuzzy",
  "fuzzy_nucleo",
- "gpui",
  "language",
  "menu",
  "open_path_prompt",
@@ -6641,14 +7114,13 @@ dependencies = [
  "util",
  "workspace",
  "zed_actions",
- "zlog",
 ]
 
 [[package]]
 name = "file_icons"
 version = "0.1.0"
 dependencies = [
- "gpui",
+ "bezel-gpui",
  "serde",
  "theme",
  "util",
@@ -6905,19 +7377,19 @@ dependencies = [
  "async-std",
  "async-tar",
  "async-trait",
- "collections",
+ "bezel-gpui",
+ "bezel-zed-collections",
+ "bezel-zed-path",
  "dunce",
  "fs",
  "futures 0.3.32",
  "git",
- "gpui",
  "ignore",
  "is_executable",
  "libc",
  "log",
  "notify 9.0.0-rc.4",
  "parking_lot",
- "path",
  "paths",
  "proto",
  "rope",
@@ -6962,9 +7434,9 @@ dependencies = [
 name = "fs_benchmarks"
 version = "0.1.0"
 dependencies = [
+ "bezel-gpui",
+ "bezel-gpui-platform",
  "fs",
- "gpui",
- "gpui_platform",
 ]
 
 [[package]]
@@ -7157,22 +7629,22 @@ dependencies = [
 name = "fuzzy"
 version = "0.1.0"
 dependencies = [
- "gpui",
- "gpui_util",
+ "bezel-gpui",
+ "bezel-gpui-util",
+ "bezel-zed-path",
  "log",
- "path",
 ]
 
 [[package]]
 name = "fuzzy_nucleo"
 version = "0.1.0"
 dependencies = [
+ "bezel-gpui",
+ "bezel-gpui-util",
+ "bezel-zed-path",
  "criterion",
  "fuzzy",
- "gpui",
- "gpui_util",
  "nucleo",
- "path",
 ]
 
 [[package]]
@@ -7350,11 +7822,13 @@ dependencies = [
  "askpass",
  "async-channel 2.5.0",
  "async-trait",
- "collections",
+ "bezel-gpui",
+ "bezel-zed-collections",
+ "bezel-zed-http-client",
+ "bezel-zed-sum-tree",
+ "bezel-zed-ztracing",
  "derive_more",
  "futures 0.3.32",
- "gpui",
- "http_client",
  "itertools 0.14.0",
  "log",
  "parking_lot",
@@ -7367,7 +7841,6 @@ dependencies = [
  "serde_json",
  "smallvec",
  "smol",
- "sum_tree",
  "tempfile",
  "text",
  "thiserror 2.0.17",
@@ -7376,7 +7849,6 @@ dependencies = [
  "urlencoding",
  "util",
  "uuid",
- "ztracing",
 ]
 
 [[package]]
@@ -7385,10 +7857,10 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-trait",
+ "bezel-gpui",
+ "bezel-zed-http-client",
  "futures 0.3.32",
  "git",
- "gpui",
- "http_client",
  "indoc",
  "itertools 0.14.0",
  "pretty_assertions",
@@ -7409,10 +7881,13 @@ dependencies = [
  "anyhow",
  "askpass",
  "async-channel 2.5.0",
+ "bezel-gpui",
+ "bezel-zed-collections",
+ "bezel-zed-zlog",
+ "bezel-zed-ztracing",
  "buffer_diff",
  "call",
  "client",
- "collections",
  "component",
  "ctor",
  "db",
@@ -7425,7 +7900,6 @@ dependencies = [
  "fuzzy_nucleo",
  "git",
  "git_ui_core",
- "gpui",
  "indoc",
  "itertools 0.14.0",
  "language",
@@ -7467,8 +7941,6 @@ dependencies = [
  "windows 0.61.3",
  "workspace",
  "zed_actions",
- "zlog",
- "ztracing",
 ]
 
 [[package]]
@@ -7477,15 +7949,17 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "askpass",
+ "bezel-gpui",
+ "bezel-zed-collections",
+ "bezel-zed-zlog",
+ "bezel-zed-ztracing",
  "buffer_diff",
- "collections",
  "db",
  "editor",
  "fs",
  "futures 0.3.32",
  "fuzzy",
  "git",
- "gpui",
  "language",
  "log",
  "menu",
@@ -7510,8 +7984,6 @@ dependencies = [
  "workspace",
  "zed_actions",
  "zeroize",
- "zlog",
- "ztracing",
 ]
 
 [[package]]
@@ -7733,8 +8205,8 @@ dependencies = [
 name = "go_to_line"
 version = "0.1.0"
 dependencies = [
+ "bezel-gpui",
  "editor",
- "gpui",
  "indoc",
  "language",
  "menu",
@@ -7778,8 +8250,8 @@ name = "google_ai"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "bezel-zed-http-client",
  "futures 0.3.32",
- "http_client",
  "language_model_core",
  "log",
  "schemars 1.0.4",
@@ -7823,348 +8295,13 @@ dependencies = [
 ]
 
 [[package]]
-name = "gpui"
-version = "0.2.2"
-dependencies = [
- "accesskit",
- "anyhow",
- "async-channel 2.5.0",
- "async-task",
- "backtrace",
- "bindgen 0.71.1",
- "bitflags 2.13.1",
- "block",
- "cbindgen",
- "chrono",
- "cocoa 0.26.0",
- "cocoa-foundation 0.2.0",
- "collections",
- "core-foundation 0.10.0",
- "core-foundation-sys",
- "core-graphics 0.24.0",
- "core-text",
- "core-video",
- "criterion",
- "ctor",
- "derive_more",
- "embed-resource",
- "env_logger 0.11.8",
- "etagere",
- "foreign-types 0.5.0",
- "futures 0.3.32",
- "futures-concurrency",
- "getrandom 0.3.4",
- "gpui_macros",
- "gpui_platform",
- "gpui_shared_string",
- "gpui_util",
- "gpui_web",
- "hdrhistogram",
- "heapless",
- "http_client",
- "image",
- "inventory",
- "itertools 0.14.0",
- "log",
- "lyon",
- "mach2 0.5.0",
- "media",
- "metal",
- "num_cpus",
- "objc",
- "objc2 0.6.3",
- "objc2-metal 0.3.2",
- "parking",
- "parking_lot",
- "pathfinder_geometry",
- "pin-project",
- "pollster 0.4.0",
- "postage",
- "profiling",
- "proptest",
- "rand 0.9.4",
- "raw-window-handle",
- "refineable",
- "regex",
- "reqwest_client",
- "resvg",
- "scheduler",
- "schemars 1.0.4",
- "seahash",
- "serde",
- "serde_json",
- "slotmap",
- "smallvec",
- "spin 0.10.0",
- "stacksafe",
- "strum 0.27.2",
- "sum_tree",
- "taffy",
- "thiserror 2.0.17",
- "tracing",
- "ttf-parser",
- "unicode-segmentation",
- "url",
- "usvg",
- "util_macros",
- "uuid",
- "waker-fn",
- "wasm-bindgen",
- "web-time",
- "windows 0.61.3",
- "zed-font-kit",
- "zed-scap",
- "ztracing",
-]
-
-[[package]]
-name = "gpui_apple"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "block",
- "cbindgen",
- "cocoa 0.26.0",
- "collections",
- "core-foundation 0.10.0",
- "core-video",
- "derive_more",
- "etagere",
- "foreign-types 0.5.0",
- "gpui",
- "image",
- "log",
- "metal",
- "objc",
- "parking_lot",
-]
-
-[[package]]
-name = "gpui_linux"
-version = "0.1.0"
-dependencies = [
- "accesskit",
- "accesskit_unix",
- "anyhow",
- "as-raw-xcb-connection",
- "ashpd",
- "bitflags 2.13.1",
- "bytemuck",
- "calloop",
- "calloop-wayland-source",
- "collections",
- "filedescriptor",
- "futures 0.3.32",
- "gpui",
- "gpui_util",
- "gpui_wgpu",
- "http_client",
- "image",
- "itertools 0.14.0",
- "libc",
- "log",
- "notify-rust",
- "oo7",
- "open",
- "parking_lot",
- "pathfinder_geometry",
- "pollster 0.4.0",
- "profiling",
- "raw-window-handle",
- "smallvec",
- "smol",
- "strum 0.27.2",
- "swash",
- "url",
- "uuid",
- "wayland-backend",
- "wayland-client",
- "wayland-cursor",
- "wayland-protocols",
- "wayland-protocols-plasma",
- "wayland-protocols-wlr",
- "x11-clipboard",
- "x11rb",
- "xkbcommon",
- "zed-scap",
- "zed-xim",
-]
-
-[[package]]
-name = "gpui_macos"
-version = "0.1.0"
-dependencies = [
- "accesskit",
- "accesskit_macos",
- "anyhow",
- "async-task",
- "block",
- "block2 0.6.2",
- "cocoa 0.26.0",
- "collections",
- "core-foundation 0.10.0",
- "core-foundation-sys",
- "core-graphics 0.24.0",
- "core-text",
- "ctor",
- "dispatch2",
- "foreign-types 0.5.0",
- "futures 0.3.32",
- "gpui",
- "gpui_apple",
- "gpui_util",
- "image",
- "itertools 0.14.0",
- "libc",
- "log",
- "mach2 0.5.0",
- "media",
- "metal",
- "objc",
- "objc2 0.6.3",
- "objc2-app-kit 0.3.2",
- "objc2-foundation 0.3.2",
- "objc2-user-notifications",
- "parking_lot",
- "pathfinder_geometry",
- "raw-window-handle",
- "semver",
- "smallvec",
- "strum 0.27.2",
- "uuid",
- "zed-font-kit",
-]
-
-[[package]]
-name = "gpui_macros"
-version = "0.1.0"
-dependencies = [
- "gpui",
- "heck 0.5.0",
- "proc-macro2",
- "quote",
- "syn 2.0.117",
-]
-
-[[package]]
-name = "gpui_platform"
-version = "0.1.0"
-dependencies = [
- "console_error_panic_hook",
- "gpui",
- "gpui_linux",
- "gpui_macos",
- "gpui_web",
- "gpui_windows",
-]
-
-[[package]]
-name = "gpui_shared_string"
-version = "0.1.0"
-dependencies = [
- "schemars 1.0.4",
- "serde",
- "smol_str",
-]
-
-[[package]]
 name = "gpui_tokio"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "gpui",
- "gpui_util",
+ "bezel-gpui",
+ "bezel-gpui-util",
  "tokio",
-]
-
-[[package]]
-name = "gpui_util"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "log",
- "which 6.0.3",
-]
-
-[[package]]
-name = "gpui_web"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "console_error_panic_hook",
- "futures 0.3.32",
- "gpui",
- "gpui_wgpu",
- "http_client",
- "js-sys",
- "log",
- "parking_lot",
- "raw-window-handle",
- "uuid",
- "wasm-bindgen",
- "wasm-bindgen-futures",
- "wasm_thread",
- "web-sys",
- "web-time",
-]
-
-[[package]]
-name = "gpui_wgpu"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "bytemuck",
- "collections",
- "cosmic-text",
- "criterion",
- "etagere",
- "gpui",
- "gpui_util",
- "itertools 0.14.0",
- "js-sys",
- "log",
- "naga",
- "parking_lot",
- "pollster 0.4.0",
- "profiling",
- "raw-window-handle",
- "smallvec",
- "swash",
- "unicode-bidi",
- "unicode-segmentation",
- "wasm-bindgen",
- "wasm-bindgen-futures",
- "web-sys",
- "wgpu",
- "zed-font-kit",
-]
-
-[[package]]
-name = "gpui_windows"
-version = "0.1.0"
-dependencies = [
- "accesskit",
- "accesskit_windows",
- "anyhow",
- "collections",
- "dunce",
- "etagere",
- "futures 0.3.32",
- "gpui",
- "gpui_util",
- "image",
- "itertools 0.14.0",
- "log",
- "parking_lot",
- "rand 0.9.4",
- "raw-window-handle",
- "smallvec",
- "uuid",
- "windows 0.61.3",
- "windows-core 0.61.2",
- "windows-numerics 0.2.0",
- "windows-registry 0.5.3",
- "zed-scap",
 ]
 
 [[package]]
@@ -8652,38 +8789,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "add0ab9360ddbd88cfeb3bd9574a1d85cfdfa14db10b3e21d3700dbc4328758f"
 
 [[package]]
-name = "http_client"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "async-compression",
- "async-fs",
- "async-tar",
- "bytes 1.11.1",
- "derive_more",
- "futures 0.3.32",
- "http 1.3.1",
- "http-body 1.0.1",
- "log",
- "parking_lot",
- "serde",
- "serde_json",
- "serde_urlencoded",
- "sha2",
- "tempfile",
- "url",
- "util",
-]
-
-[[package]]
-name = "http_client_tls"
-version = "0.1.0"
-dependencies = [
- "rustls 0.23.40",
- "rustls-platform-verifier",
-]
-
-[[package]]
 name = "http_proxy"
 version = "0.1.0"
 dependencies = [
@@ -9056,11 +9161,11 @@ name = "image_viewer"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "bezel-gpui",
  "db",
  "editor",
  "file_icons",
  "fs",
- "gpui",
  "language",
  "log",
  "menu",
@@ -9187,9 +9292,9 @@ dependencies = [
 name = "input_latency_ui"
 version = "0.1.0"
 dependencies = [
+ "bezel-gpui",
+ "bezel-zed-collections",
  "chrono",
- "collections",
- "gpui",
  "hdrhistogram",
  "telemetry",
 ]
@@ -9199,10 +9304,11 @@ name = "inspector_ui"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "bezel-gpui",
+ "bezel-zed-util-macros",
  "command_palette_hooks",
  "editor",
  "fuzzy",
- "gpui",
  "language",
  "project",
  "serde_json",
@@ -9210,7 +9316,6 @@ dependencies = [
  "theme_settings",
  "ui",
  "util",
- "util_macros",
  "workspace",
  "zed_actions",
 ]
@@ -9220,8 +9325,8 @@ name = "install_cli"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "bezel-gpui",
  "client",
- "gpui",
  "log",
  "release_channel",
  "smol",
@@ -9469,9 +9574,9 @@ name = "journal"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "bezel-gpui",
  "chrono",
  "editor",
- "gpui",
  "log",
  "serde",
  "settings",
@@ -9519,11 +9624,11 @@ name = "json_schema_store"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "collections",
+ "bezel-gpui",
+ "bezel-zed-collections",
  "dap",
  "extension",
  "feature_flags",
- "gpui",
  "language",
  "parking_lot",
  "paths",
@@ -9623,14 +9728,14 @@ name = "keymap_editor"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "collections",
+ "bezel-gpui",
+ "bezel-zed-collections",
  "command_palette",
  "component",
  "db",
  "editor",
  "fs",
  "fuzzy",
- "gpui",
  "itertools 0.14.0",
  "json_schema_store",
  "language",
@@ -9760,8 +9865,13 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-trait",
+ "bezel-gpui",
+ "bezel-zed-collections",
+ "bezel-zed-http-client",
+ "bezel-zed-sum-tree",
+ "bezel-zed-zlog",
+ "bezel-zed-ztracing",
  "clock",
- "collections",
  "criterion",
  "ctor",
  "diffy",
@@ -9772,9 +9882,7 @@ dependencies = [
  "futures-lite 1.13.0",
  "fuzzy_nucleo",
  "globset",
- "gpui",
  "grammars",
- "http_client",
  "imara-diff",
  "indoc",
  "itertools 0.14.0",
@@ -9795,7 +9903,6 @@ dependencies = [
  "smallvec",
  "streaming-iterator",
  "strsim 0.11.1",
- "sum_tree",
  "task",
  "text",
  "theme",
@@ -9818,8 +9925,6 @@ dependencies = [
  "unindent",
  "util",
  "watch",
- "zlog",
- "ztracing",
 ]
 
 [[package]]
@@ -9827,12 +9932,12 @@ name = "language_core"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "collections",
- "gpui_shared_string",
- "gpui_util",
+ "bezel-gpui-shared-string",
+ "bezel-gpui-util",
+ "bezel-zed-collections",
+ "bezel-zed-path",
  "log",
  "parking_lot",
- "path",
  "regex",
  "schemars 1.0.4",
  "serde",
@@ -9847,11 +9952,12 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-trait",
- "collections",
+ "bezel-gpui",
+ "bezel-zed-collections",
+ "bezel-zed-ztracing",
  "extension",
  "fs",
  "futures 0.3.32",
- "gpui",
  "language",
  "log",
  "lsp",
@@ -9860,7 +9966,6 @@ dependencies = [
  "serde_json",
  "tracing",
  "util",
- "ztracing",
 ]
 
 [[package]]
@@ -9869,13 +9974,13 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
- "collections",
+ "bezel-gpui",
+ "bezel-gpui-util",
+ "bezel-zed-collections",
+ "bezel-zed-http-client",
  "credentials_provider",
  "env_var",
  "futures 0.3.32",
- "gpui",
- "gpui_util",
- "http_client",
  "icons",
  "image",
  "language_model_core",
@@ -9892,10 +9997,10 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-lock",
+ "bezel-gpui-shared-string",
+ "bezel-zed-http-client",
  "cloud_llm_client",
  "futures 0.3.32",
- "gpui_shared_string",
- "http_client",
  "log",
  "partial-json-fixer",
  "pretty_assertions",
@@ -9920,12 +10025,14 @@ dependencies = [
  "aws_http_client",
  "base64 0.22.1",
  "bedrock",
+ "bezel-gpui",
+ "bezel-zed-collections",
+ "bezel-zed-http-client",
  "client",
  "clock",
  "cloud_api_client",
  "cloud_api_types",
  "cloud_llm_client",
- "collections",
  "component",
  "convert_case 0.11.0",
  "copilot_chat",
@@ -9939,9 +10046,7 @@ dependencies = [
  "fs",
  "futures 0.3.32",
  "google_ai",
- "gpui",
  "gpui_tokio",
- "http_client",
  "language",
  "language_model",
  "language_models_cloud",
@@ -9978,11 +10083,11 @@ version = "0.1.0"
 dependencies = [
  "anthropic",
  "anyhow",
+ "bezel-gpui",
+ "bezel-zed-http-client",
  "cloud_llm_client",
  "futures 0.3.32",
  "google_ai",
- "gpui",
- "http_client",
  "language_model",
  "log",
  "open_ai",
@@ -9997,9 +10102,9 @@ dependencies = [
 name = "language_onboarding"
 version = "0.1.0"
 dependencies = [
+ "bezel-gpui",
  "db",
  "editor",
- "gpui",
  "project",
  "ui",
  "workspace",
@@ -10010,10 +10115,10 @@ name = "language_selector"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "bezel-gpui",
  "editor",
  "file_icons",
  "fuzzy",
- "gpui",
  "language",
  "open_path_prompt",
  "picker",
@@ -10030,13 +10135,14 @@ name = "language_tools"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "bezel-gpui",
+ "bezel-zed-collections",
+ "bezel-zed-zlog",
  "client",
- "collections",
  "command_palette_hooks",
  "edit_prediction",
  "editor",
  "futures 0.3.32",
- "gpui",
  "itertools 0.14.0",
  "language",
  "lsp",
@@ -10056,7 +10162,6 @@ dependencies = [
  "util",
  "workspace",
  "zed_actions",
- "zlog",
 ]
 
 [[package]]
@@ -10068,14 +10173,14 @@ dependencies = [
  "async-fs",
  "async-tar",
  "async-trait",
+ "bezel-gpui",
+ "bezel-zed-collections",
+ "bezel-zed-http-client",
  "chrono",
- "collections",
  "fs",
  "futures 0.3.32",
  "globset",
- "gpui",
  "grammars",
- "http_client",
  "itertools 0.14.0",
  "json_schema_store",
  "language",
@@ -10271,8 +10376,8 @@ dependencies = [
 name = "line_ending_selector"
 version = "0.1.0"
 dependencies = [
+ "bezel-gpui",
  "editor",
- "gpui",
  "language",
  "picker",
  "project",
@@ -10441,17 +10546,17 @@ dependencies = [
  "anyhow",
  "async-trait",
  "audio",
+ "bezel-gpui",
+ "bezel-gpui-platform",
+ "bezel-zed-collections",
+ "bezel-zed-http-client-tls",
  "cocoa 0.26.0",
- "collections",
  "core-foundation 0.10.0",
  "core-video",
  "coreaudio-rs 0.12.1",
  "cpal",
  "futures 0.3.32",
- "gpui",
- "gpui_platform",
  "gpui_tokio",
- "http_client_tls",
  "image",
  "libwebrtc",
  "livekit",
@@ -10480,8 +10585,8 @@ name = "llama_cpp"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "bezel-zed-http-client",
  "futures 0.3.32",
- "http_client",
  "schemars 1.0.4",
  "serde",
  "serde_json",
@@ -10504,8 +10609,8 @@ name = "lmstudio"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "bezel-zed-http-client",
  "futures 0.3.32",
- "http_client",
  "schemars 1.0.4",
  "serde",
  "serde_json",
@@ -10626,12 +10731,13 @@ dependencies = [
  "anyhow",
  "async-channel 2.5.0",
  "async-pipe",
- "collections",
+ "bezel-gpui",
+ "bezel-gpui-util",
+ "bezel-zed-collections",
+ "bezel-zed-zlog",
  "ctor",
  "futures 0.3.32",
  "futures-lite 1.13.0",
- "gpui",
- "gpui_util",
  "log",
  "lsp-types",
  "parking_lot",
@@ -10642,7 +10748,6 @@ dependencies = [
  "serde",
  "serde_json",
  "util",
- "zlog",
 ]
 
 [[package]]
@@ -10661,11 +10766,11 @@ name = "lsp_locations"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "collections",
+ "bezel-gpui",
+ "bezel-zed-collections",
  "editor",
  "file_icons",
  "fuzzy",
- "gpui",
  "indoc",
  "language",
  "log",
@@ -10689,7 +10794,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "dbcb7d54d54c8937364c9d41902d066656817dce1e03a44e5533afebd1ef4352"
 dependencies = [
  "lyon_algorithms",
- "lyon_extra",
  "lyon_tessellation",
 ]
 
@@ -10701,16 +10805,6 @@ checksum = "f4c0829e28c4f336396f250d850c3987e16ce6db057ffe047ce0dd54aab6b647"
 dependencies = [
  "lyon_path",
  "num-traits",
-]
-
-[[package]]
-name = "lyon_extra"
-version = "1.0.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1ca94c7bf1e2557c2798989c43416822c12fc5dcc5e17cc3307ef0e71894a955"
-dependencies = [
- "lyon_path",
- "thiserror 1.0.69",
 ]
 
 [[package]]
@@ -10817,12 +10911,13 @@ dependencies = [
  "anyhow",
  "assets",
  "base64 0.22.1",
- "collections",
+ "bezel-gpui",
+ "bezel-gpui-platform",
+ "bezel-zed-collections",
+ "bezel-zed-sum-tree",
  "env_logger 0.11.8",
  "fs",
  "futures 0.3.32",
- "gpui",
- "gpui_platform",
  "html5ever 0.27.0",
  "image",
  "indoc",
@@ -10837,7 +10932,6 @@ dependencies = [
  "settings",
  "smallvec",
  "stacksafe",
- "sum_tree",
  "theme",
  "theme_settings",
  "ui",
@@ -10849,11 +10943,11 @@ name = "markdown_preview"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "bezel-gpui",
  "buffer_diff",
  "db",
  "editor",
  "fs",
- "gpui",
  "language",
  "log",
  "markdown",
@@ -11006,20 +11100,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "media"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "bindgen 0.71.1",
- "core-foundation 0.10.0",
- "core-video",
- "ctor",
- "foreign-types 0.5.0",
- "metal",
- "objc",
-]
-
-[[package]]
 name = "memchr"
 version = "2.7.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -11056,7 +11136,7 @@ dependencies = [
 name = "menu"
 version = "0.1.0"
 dependencies = [
- "gpui",
+ "bezel-gpui",
 ]
 
 [[package]]
@@ -11086,14 +11166,14 @@ name = "mermaid_render"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "gpui",
+ "bezel-gpui",
+ "bezel-zed-ztracing",
  "mermaid_render",
  "merman",
  "quick-xml 0.38.3",
  "serde_json",
  "tracing",
  "usvg",
- "ztracing",
 ]
 
 [[package]]
@@ -11178,7 +11258,7 @@ name = "migrator"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "collections",
+ "bezel-zed-collections",
  "convert_case 0.11.0",
  "log",
  "pretty_assertions",
@@ -11288,8 +11368,8 @@ checksum = "68354c5c6bd36d73ff3feceb05efa59b6acb7626617f4962be322a825e61f79a"
 name = "miniprofiler_ui"
 version = "0.1.0"
 dependencies = [
+ "bezel-gpui",
  "command_palette_hooks",
- "gpui",
  "rpc",
  "serde_json",
  "settings",
@@ -11348,8 +11428,8 @@ name = "mistral"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "bezel-zed-http-client",
  "futures 0.3.32",
- "http_client",
  "schemars 1.0.4",
  "serde",
  "serde_json",
@@ -11398,12 +11478,15 @@ name = "multi_buffer"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "bezel-gpui",
+ "bezel-zed-collections",
+ "bezel-zed-sum-tree",
+ "bezel-zed-zlog",
+ "bezel-zed-ztracing",
  "buffer_diff",
  "clock",
- "collections",
  "ctor",
  "futures-lite 1.13.0",
- "gpui",
  "indoc",
  "itertools 0.14.0",
  "language",
@@ -11415,15 +11498,12 @@ dependencies = [
  "serde",
  "settings",
  "smallvec",
- "sum_tree",
  "text",
  "theme",
  "tracing",
  "tree-sitter",
  "unicode-segmentation",
  "util",
- "zlog",
- "ztracing",
 ]
 
 [[package]]
@@ -11624,9 +11704,9 @@ dependencies = [
  "async-std",
  "async-tar",
  "async-trait",
+ "bezel-zed-http-client",
  "chrono",
  "futures 0.3.32",
- "http_client",
  "log",
  "paths",
  "semver",
@@ -11677,13 +11757,13 @@ name = "notifications"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "bezel-gpui",
+ "bezel-zed-sum-tree",
  "channel",
  "client",
  "component",
  "futures-lite 1.13.0",
- "gpui",
  "rpc",
- "sum_tree",
  "time",
  "ui",
  "util",
@@ -12369,8 +12449,8 @@ name = "ollama"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "bezel-zed-http-client",
  "futures 0.3.32",
- "http_client",
  "schemars 1.0.4",
  "serde",
  "serde_json",
@@ -12382,15 +12462,16 @@ name = "onboarding"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "bezel-gpui",
+ "bezel-zed-collections",
+ "bezel-zed-zlog",
  "client",
  "cloud_api_types",
- "collections",
  "component",
  "db",
  "documented",
  "fs",
  "fuzzy",
- "gpui",
  "menu",
  "notifications",
  "picker",
@@ -12406,7 +12487,6 @@ dependencies = [
  "vim_mode_setting",
  "workspace",
  "zed_actions",
- "zlog",
 ]
 
 [[package]]
@@ -12478,9 +12558,9 @@ name = "open_ai"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "collections",
+ "bezel-zed-collections",
+ "bezel-zed-http-client",
  "futures 0.3.32",
- "http_client",
  "language_model_core",
  "log",
  "pretty_assertions",
@@ -12496,11 +12576,11 @@ dependencies = [
 name = "open_path_prompt"
 version = "0.1.0"
 dependencies = [
+ "bezel-gpui",
  "editor",
  "file_icons",
  "futures 0.3.32",
  "fuzzy",
- "gpui",
  "picker",
  "project",
  "schemars 1.0.4",
@@ -12519,8 +12599,8 @@ name = "open_router"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "bezel-zed-http-client",
  "futures 0.3.32",
- "http_client",
  "language_model_core",
  "open_ai",
  "schemars 1.0.4",
@@ -12537,10 +12617,10 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
+ "bezel-gpui",
+ "bezel-zed-http-client",
  "credentials_provider",
  "futures 0.3.32",
- "gpui",
- "http_client",
  "language_model",
  "log",
  "oauth_callback_server",
@@ -12560,9 +12640,9 @@ name = "opencode"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "bezel-zed-http-client",
  "futures 0.3.32",
  "google_ai",
- "http_client",
  "language_model_core",
  "schemars 1.0.4",
  "serde",
@@ -12704,10 +12784,10 @@ dependencies = [
 name = "outline"
 version = "0.1.0"
 dependencies = [
+ "bezel-gpui",
  "editor",
  "futures 0.3.32",
  "fuzzy_nucleo",
- "gpui",
  "indoc",
  "language",
  "lsp",
@@ -12732,13 +12812,13 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-channel 2.5.0",
- "collections",
+ "bezel-gpui",
+ "bezel-zed-collections",
  "db",
  "editor",
  "file_icons",
  "futures 0.3.32",
  "fuzzy",
- "gpui",
  "itertools 0.14.0",
  "language",
  "log",
@@ -12816,7 +12896,7 @@ dependencies = [
 name = "panel"
 version = "0.1.0"
 dependencies = [
- "gpui",
+ "bezel-gpui",
  "ui",
  "workspace",
 ]
@@ -12887,16 +12967,6 @@ name = "pastey"
 version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "35fb2e5f958ec131621fdd531e9fc186ed768cbe395337403ae56c17a74c68ec"
-
-[[package]]
-name = "path"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "dunce",
- "serde",
- "tempfile",
-]
 
 [[package]]
 name = "pathdiff"
@@ -13049,15 +13119,6 @@ name = "percent-encoding"
 version = "2.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9b4f627cb1b25917193a259e49bdad08f671f8d9708acfd5fe0a8c1455d87220"
-
-[[package]]
-name = "perf"
-version = "0.1.0"
-dependencies = [
- "collections",
- "serde",
- "serde_json",
-]
 
 [[package]]
 name = "pest"
@@ -13700,9 +13761,9 @@ name = "picker"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "bezel-gpui",
  "db",
  "editor",
- "gpui",
  "language",
  "menu",
  "project",
@@ -13723,8 +13784,8 @@ dependencies = [
 name = "picker_preview"
 version = "0.1.0"
 dependencies = [
+ "bezel-gpui",
  "editor",
- "gpui",
  "language",
  "multi_buffer",
  "picker",
@@ -13831,7 +13892,7 @@ checksum = "b4596b6d070b27117e987119b4dac604f3c58cfb0b191112e24771b2faeac1a6"
 name = "platform_title_bar"
 version = "0.1.0"
 dependencies = [
- "gpui",
+ "bezel-gpui",
  "project",
  "settings",
  "smallvec",
@@ -14070,9 +14131,9 @@ name = "prettier"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "collections",
+ "bezel-gpui",
+ "bezel-zed-collections",
  "fs",
- "gpui",
  "language",
  "log",
  "lsp",
@@ -14199,11 +14260,17 @@ dependencies = [
  "async-channel 2.5.0",
  "async-trait",
  "base64 0.22.1",
+ "bezel-gpui",
+ "bezel-zed-collections",
+ "bezel-zed-http-client",
+ "bezel-zed-path",
+ "bezel-zed-sum-tree",
+ "bezel-zed-zlog",
+ "bezel-zed-ztracing",
  "buffer_diff",
  "circular-buffer",
  "client",
  "clock",
- "collections",
  "context_server",
  "credentials_provider",
  "dap",
@@ -14217,8 +14284,6 @@ dependencies = [
  "git",
  "git_hosting_providers",
  "globset",
- "gpui",
- "http_client",
  "image",
  "indexmap 2.14.0",
  "itertools 0.14.0",
@@ -14228,7 +14293,6 @@ dependencies = [
  "markdown",
  "node_runtime",
  "parking_lot",
- "path",
  "paths",
  "percent-encoding",
  "postage",
@@ -14251,7 +14315,6 @@ dependencies = [
  "smol",
  "snippet",
  "snippet_provider",
- "sum_tree",
  "task",
  "tempfile",
  "terminal",
@@ -14267,8 +14330,6 @@ dependencies = [
  "worktree",
  "zed_credentials_provider",
  "zeroize",
- "zlog",
- "ztracing",
 ]
 
 [[package]]
@@ -14277,12 +14338,12 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "askpass",
+ "bezel-gpui",
+ "bezel-gpui-platform",
+ "bezel-zed-http-client",
  "clap",
  "client",
  "futures 0.3.32",
- "gpui",
- "gpui_platform",
- "http_client",
  "language",
  "node_runtime",
  "project",
@@ -14299,8 +14360,9 @@ name = "project_panel"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "bezel-gpui",
+ "bezel-zed-collections",
  "client",
- "collections",
  "criterion",
  "editor",
  "file_icons",
@@ -14309,7 +14371,6 @@ dependencies = [
  "git",
  "git_ui",
  "git_ui_core",
- "gpui",
  "itertools 0.14.0",
  "language",
  "log",
@@ -14342,10 +14403,10 @@ name = "project_symbols"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "bezel-gpui",
  "editor",
  "futures 0.3.32",
  "fuzzy",
- "gpui",
  "language",
  "lsp",
  "ordered-float 2.10.1",
@@ -14384,12 +14445,12 @@ dependencies = [
  "agent_skills",
  "anyhow",
  "assets",
+ "bezel-gpui",
+ "bezel-zed-collections",
  "chrono",
- "collections",
  "db",
  "fs",
  "futures 0.3.32",
- "gpui",
  "handlebars 4.5.0",
  "heed",
  "language",
@@ -15136,6 +15197,8 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "askpass",
+ "bezel-gpui",
+ "bezel-zed-http-client",
  "chrono",
  "db",
  "dev_container",
@@ -15145,8 +15208,6 @@ dependencies = [
  "fs",
  "futures 0.3.32",
  "fuzzy_nucleo",
- "gpui",
- "http_client",
  "indoc",
  "language",
  "log",
@@ -15251,13 +15312,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "refineable"
-version = "0.1.0"
-dependencies = [
- "derive_refineable",
-]
-
-[[package]]
 name = "regalloc2"
 version = "0.12.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -15311,7 +15365,7 @@ checksum = "7a2d987857b319362043e95f5353c0535c1f58eec5336fdfcf626430af7def58"
 name = "release_channel"
 version = "0.1.0"
 dependencies = [
- "gpui",
+ "bezel-gpui",
  "semver",
 ]
 
@@ -15323,10 +15377,10 @@ dependencies = [
  "askpass",
  "async-trait",
  "base64 0.22.1",
- "collections",
+ "bezel-gpui",
+ "bezel-zed-collections",
  "fs",
  "futures 0.3.32",
- "gpui",
  "log",
  "parking_lot",
  "paths",
@@ -15354,8 +15408,8 @@ dependencies = [
  "anyhow",
  "askpass",
  "auto_update",
+ "bezel-gpui",
  "futures 0.3.32",
- "gpui",
  "log",
  "markdown",
  "menu",
@@ -15380,11 +15434,16 @@ dependencies = [
  "anyhow",
  "askpass",
  "async-channel 2.5.0",
+ "bezel-gpui",
+ "bezel-gpui-platform",
+ "bezel-zed-collections",
+ "bezel-zed-http-client",
+ "bezel-zed-reqwest-client",
+ "bezel-zed-zlog",
  "cargo_toml",
  "clap",
  "client",
  "clock",
- "collections",
  "crash-handler",
  "crashes",
  "dap_adapters",
@@ -15398,10 +15457,7 @@ dependencies = [
  "futures 0.3.32",
  "git",
  "git_hosting_providers",
- "gpui",
- "gpui_platform",
  "gpui_tokio",
- "http_client",
  "image",
  "json_schema_store",
  "language",
@@ -15421,7 +15477,6 @@ dependencies = [
  "rayon",
  "release_channel",
  "remote",
- "reqwest_client",
  "rpc",
  "rust-embed",
  "semver",
@@ -15445,7 +15500,6 @@ dependencies = [
  "windows 0.61.3",
  "workspace",
  "worktree",
- "zlog",
 ]
 
 [[package]]
@@ -15473,16 +15527,16 @@ dependencies = [
  "async-trait",
  "async-tungstenite",
  "base64 0.22.1",
+ "bezel-gpui",
+ "bezel-zed-collections",
+ "bezel-zed-http-client",
  "client",
- "collections",
  "command_palette_hooks",
  "editor",
  "feature_flags",
  "file_icons",
  "futures 0.3.32",
- "gpui",
  "html_to_markdown",
- "http_client",
  "image",
  "indoc",
  "jupyter-protocol",
@@ -15597,23 +15651,6 @@ dependencies = [
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "web-sys",
-]
-
-[[package]]
-name = "reqwest_client"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "bytes 1.11.1",
- "futures 0.3.32",
- "gpui_util",
- "http_client",
- "http_client_tls",
- "log",
- "regex",
- "serde",
- "tokio",
- "zed-reqwest",
 ]
 
 [[package]]
@@ -15737,19 +15774,19 @@ dependencies = [
 name = "rope"
 version = "0.1.0"
 dependencies = [
+ "bezel-gpui",
+ "bezel-zed-sum-tree",
+ "bezel-zed-zlog",
+ "bezel-zed-ztracing",
  "criterion",
  "ctor",
- "gpui",
  "heapless",
  "log",
  "rand 0.9.4",
  "rayon",
- "sum_tree",
  "tracing",
  "unicode-segmentation",
  "util",
- "zlog",
- "ztracing",
 ]
 
 [[package]]
@@ -15801,9 +15838,10 @@ dependencies = [
  "anyhow",
  "async-tungstenite",
  "base64 0.22.1",
- "collections",
+ "bezel-gpui",
+ "bezel-zed-collections",
+ "bezel-zed-zlog",
  "futures 0.3.32",
- "gpui",
  "parking_lot",
  "proto",
  "rand 0.9.4",
@@ -15814,7 +15852,6 @@ dependencies = [
  "strum 0.27.2",
  "tracing",
  "util",
- "zlog",
  "zstd",
 ]
 
@@ -16211,8 +16248,8 @@ name = "sandbox"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "bezel-gpui",
  "futures 0.3.32",
- "gpui",
  "http_proxy",
  "libc",
  "log",
@@ -16242,20 +16279,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "891d81b926048e76efe18581bf793546b4c0eaf8448d72be8de2bbee5fd166e1"
 dependencies = [
  "windows-sys 0.61.2",
-]
-
-[[package]]
-name = "scheduler"
-version = "0.1.0"
-dependencies = [
- "async-task",
- "backtrace",
- "chrono",
- "flume 0.12.0",
- "futures 0.3.32",
- "parking_lot",
- "rand 0.9.4",
- "web-time",
 ]
 
 [[package]]
@@ -16487,14 +16510,16 @@ version = "0.1.0"
 dependencies = [
  "any_vec",
  "anyhow",
+ "bezel-gpui",
+ "bezel-zed-collections",
+ "bezel-zed-util-macros",
+ "bezel-zed-ztracing",
  "bitflags 2.13.1",
- "collections",
  "db",
  "editor",
  "file_icons",
  "fs",
  "futures 0.3.32",
- "gpui",
  "itertools 0.14.0",
  "language",
  "lsp",
@@ -16516,10 +16541,8 @@ dependencies = [
  "ui",
  "unindent",
  "util",
- "util_macros",
  "workspace",
  "zed_actions",
- "ztracing",
 ]
 
 [[package]]
@@ -16846,8 +16869,8 @@ dependencies = [
 name = "session"
 version = "0.1.0"
 dependencies = [
+ "bezel-gpui",
  "db",
- "gpui",
  "serde_json",
  "util",
  "uuid",
@@ -16858,11 +16881,12 @@ name = "settings"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "collections",
+ "bezel-gpui",
+ "bezel-zed-collections",
+ "bezel-zed-zlog",
  "ec4rs",
  "fs",
  "futures 0.3.32",
- "gpui",
  "indoc",
  "inventory",
  "log",
@@ -16881,7 +16905,6 @@ dependencies = [
  "smallvec",
  "unindent",
  "util",
- "zlog",
 ]
 
 [[package]]
@@ -16889,9 +16912,9 @@ name = "settings_content"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "collections",
+ "bezel-gpui",
+ "bezel-zed-collections",
  "derive_more",
- "gpui",
  "language_model_core",
  "log",
  "schemars 1.0.4",
@@ -16933,9 +16956,9 @@ dependencies = [
 name = "settings_profile_selector"
 version = "0.1.0"
 dependencies = [
+ "bezel-gpui",
  "editor",
  "fuzzy",
- "gpui",
  "menu",
  "picker",
  "project",
@@ -16957,10 +16980,12 @@ dependencies = [
  "agent_skills",
  "anyhow",
  "audio",
+ "bezel-gpui",
+ "bezel-zed-collections",
+ "bezel-zed-http-client",
  "client",
  "cloud_api_types",
  "codestral",
- "collections",
  "component",
  "context_server",
  "copilot",
@@ -16975,9 +17000,7 @@ dependencies = [
  "fs",
  "futures 0.3.32",
  "fuzzy",
- "gpui",
  "heck 0.5.0",
- "http_client",
  "http_proxy",
  "itertools 0.14.0",
  "language",
@@ -17117,6 +17140,8 @@ dependencies = [
  "agent_ui",
  "anyhow",
  "async-channel 2.5.0",
+ "bezel-gpui",
+ "bezel-zed-http-client",
  "chrono",
  "client",
  "clock",
@@ -17127,8 +17152,6 @@ dependencies = [
  "fs",
  "git",
  "git_ui_core",
- "gpui",
- "http_client",
  "itertools 0.14.0",
  "language",
  "language_model",
@@ -17398,11 +17421,11 @@ name = "snippet_provider"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "collections",
+ "bezel-gpui",
+ "bezel-zed-collections",
  "extension",
  "fs",
  "futures 0.3.32",
- "gpui",
  "indoc",
  "parking_lot",
  "paths",
@@ -17418,9 +17441,9 @@ dependencies = [
 name = "snippets_ui"
 version = "0.1.0"
 dependencies = [
+ "bezel-gpui",
  "file_icons",
  "fuzzy",
- "gpui",
  "language",
  "open_path_prompt",
  "paths",
@@ -17512,7 +17535,7 @@ name = "sqlez"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "collections",
+ "bezel-zed-collections",
  "futures 0.3.32",
  "indoc",
  "libsqlite3-sys",
@@ -17928,21 +17951,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "13c2bddecc57b384dee18652358fb23172facb8a2c51ccc10d74c157bdea3292"
 
 [[package]]
-name = "sum_tree"
-version = "0.1.0"
-dependencies = [
- "ctor",
- "heapless",
- "log",
- "proptest",
- "rand 0.9.4",
- "rayon",
- "tracing",
- "zlog",
- "ztracing",
-]
-
-[[package]]
 name = "sval"
 version = "2.15.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -18040,8 +18048,8 @@ dependencies = [
 name = "svg_preview"
 version = "0.1.0"
 dependencies = [
+ "bezel-gpui",
  "file_icons",
- "gpui",
  "language",
  "multi_buffer",
  "ui",
@@ -18299,7 +18307,7 @@ dependencies = [
 name = "syntax_theme"
 version = "0.1.0"
 dependencies = [
- "gpui",
+ "bezel-gpui",
  "serde",
  "serde_json",
 ]
@@ -18417,7 +18425,7 @@ name = "system_specs"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "gpui",
+ "bezel-gpui",
  "human_bytes",
  "pciid-parser",
  "release_channel",
@@ -18430,11 +18438,12 @@ dependencies = [
 name = "tab_switcher"
 version = "0.1.0"
 dependencies = [
- "collections",
+ "bezel-gpui",
+ "bezel-zed-collections",
+ "bezel-zed-zlog",
  "ctor",
  "editor",
  "fuzzy_nucleo",
- "gpui",
  "menu",
  "picker",
  "project",
@@ -18447,7 +18456,6 @@ dependencies = [
  "ui",
  "util",
  "workspace",
- "zlog",
 ]
 
 [[package]]
@@ -18503,9 +18511,9 @@ name = "task"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "collections",
+ "bezel-gpui",
+ "bezel-zed-collections",
  "futures 0.3.32",
- "gpui",
  "hex",
  "log",
  "parking_lot",
@@ -18526,11 +18534,11 @@ name = "tasks_ui"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "collections",
+ "bezel-gpui",
+ "bezel-zed-collections",
  "editor",
  "file_icons",
  "fuzzy",
- "gpui",
  "itertools 0.14.0",
  "language",
  "menu",
@@ -18630,10 +18638,11 @@ dependencies = [
  "alacritty_terminal",
  "anyhow",
  "async-channel 2.5.0",
- "collections",
+ "bezel-gpui",
+ "bezel-zed-collections",
+ "bezel-zed-util-macros",
  "futures 0.3.32",
  "futures-lite 1.13.0",
- "gpui",
  "itertools 0.14.0",
  "libc",
  "log",
@@ -18653,7 +18662,6 @@ dependencies = [
  "url",
  "urlencoding",
  "util",
- "util_macros",
  "vte",
  "windows 0.61.3",
 ]
@@ -18674,13 +18682,13 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-recursion",
+ "bezel-gpui",
+ "bezel-zed-collections",
  "breadcrumbs",
- "collections",
  "db",
  "dirs",
  "editor",
  "futures 0.3.32",
- "gpui",
  "itertools 0.14.0",
  "language",
  "log",
@@ -18713,10 +18721,12 @@ name = "text"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "bezel-gpui",
+ "bezel-zed-collections",
+ "bezel-zed-sum-tree",
+ "bezel-zed-zlog",
  "clock",
- "collections",
  "ctor",
- "gpui",
  "log",
  "parking_lot",
  "postage",
@@ -18724,9 +18734,7 @@ dependencies = [
  "regex",
  "rope",
  "smallvec",
- "sum_tree",
  "util",
- "zlog",
 ]
 
 [[package]]
@@ -18734,11 +18742,11 @@ name = "theme"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "collections",
- "gpui",
+ "bezel-gpui",
+ "bezel-zed-collections",
+ "bezel-zed-refineable",
  "palette",
  "parking_lot",
- "refineable",
  "schemars 1.0.4",
  "serde",
  "serde_json",
@@ -18754,9 +18762,9 @@ name = "theme_extension"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "bezel-gpui",
  "extension",
  "fs",
- "gpui",
  "theme",
  "theme_settings",
 ]
@@ -18766,9 +18774,9 @@ name = "theme_importer"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "bezel-gpui",
+ "bezel-zed-collections",
  "clap",
- "collections",
- "gpui",
  "indexmap 2.14.0",
  "log",
  "palette",
@@ -18786,10 +18794,10 @@ dependencies = [
 name = "theme_selector"
 version = "0.1.0"
 dependencies = [
+ "bezel-gpui",
  "editor",
  "fs",
  "fuzzy",
- "gpui",
  "log",
  "picker",
  "project",
@@ -18810,12 +18818,12 @@ name = "theme_settings"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "collections",
- "gpui",
- "gpui_util",
+ "bezel-gpui",
+ "bezel-gpui-util",
+ "bezel-zed-collections",
+ "bezel-zed-refineable",
  "log",
  "palette",
- "refineable",
  "schemars 1.0.4",
  "serde",
  "serde_json",
@@ -19022,6 +19030,7 @@ dependencies = [
  "anyhow",
  "arrayvec",
  "auto_update",
+ "bezel-gpui",
  "call",
  "channel",
  "chrono",
@@ -19031,7 +19040,6 @@ dependencies = [
  "db",
  "fs",
  "git_ui_core",
- "gpui",
  "icons",
  "livekit_client",
  "notifications",
@@ -19308,11 +19316,11 @@ name = "toolchain_selector"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "bezel-gpui",
  "convert_case 0.11.0",
  "editor",
  "futures 0.3.32",
  "fuzzy",
- "gpui",
  "language",
  "menu",
  "open_path_prompt",
@@ -19913,12 +19921,12 @@ dependencies = [
 name = "ui"
 version = "0.1.0"
 dependencies = [
+ "bezel-gpui",
+ "bezel-gpui-macros",
+ "bezel-gpui-util",
  "chrono",
  "component",
  "documented",
- "gpui",
- "gpui_macros",
- "gpui_util",
  "icons",
  "itertools 0.14.0",
  "log",
@@ -19940,8 +19948,8 @@ dependencies = [
 name = "ui_input"
 version = "0.1.0"
 dependencies = [
+ "bezel-gpui",
  "component",
- "gpui",
  "ui",
 ]
 
@@ -19959,7 +19967,7 @@ dependencies = [
 name = "ui_prompt"
 version = "0.1.0"
 dependencies = [
- "gpui",
+ "bezel-gpui",
  "markdown",
  "menu",
  "settings",
@@ -20171,20 +20179,21 @@ dependencies = [
  "anyhow",
  "async-fs",
  "async_zip",
- "collections",
+ "bezel-gpui-util",
+ "bezel-zed-collections",
+ "bezel-zed-path",
+ "bezel-zed-util-macros",
  "command-fds",
  "dirs",
  "dunce",
  "futures 0.3.32",
  "futures-lite 1.13.0",
  "globset",
- "gpui_util",
  "itertools 0.14.0",
  "libc",
  "log",
  "mach2 0.5.0",
  "nix 0.29.0",
- "path",
  "percent-encoding",
  "pretty_assertions",
  "rand 0.9.4",
@@ -20201,19 +20210,9 @@ dependencies = [
  "tendril",
  "unicase",
  "url",
- "util_macros",
  "walkdir",
  "which 6.0.3",
  "windows 0.61.3",
-]
-
-[[package]]
-name = "util_macros"
-version = "0.1.0"
-dependencies = [
- "perf",
- "quote",
- "syn 2.0.117",
 ]
 
 [[package]]
@@ -20317,7 +20316,10 @@ dependencies = [
  "anyhow",
  "async-compat",
  "async-trait",
- "collections",
+ "bezel-gpui",
+ "bezel-zed-collections",
+ "bezel-zed-perf",
+ "bezel-zed-util-macros",
  "command_palette",
  "command_palette_hooks",
  "db",
@@ -20326,7 +20328,6 @@ dependencies = [
  "futures 0.3.32",
  "fuzzy",
  "git_ui",
- "gpui",
  "indoc",
  "itertools 0.14.0",
  "language",
@@ -20338,7 +20339,6 @@ dependencies = [
  "nvim-rs",
  "outline_panel",
  "parking_lot",
- "perf",
  "picker",
  "project",
  "project_panel",
@@ -20358,7 +20358,6 @@ dependencies = [
  "tokio",
  "ui",
  "util",
- "util_macros",
  "vim_mode_setting",
  "workspace",
  "zed_actions",
@@ -20368,7 +20367,7 @@ dependencies = [
 name = "vim_mode_setting"
 version = "0.1.0"
 dependencies = [
- "gpui",
+ "bezel-gpui",
  "settings",
 ]
 
@@ -20674,17 +20673,6 @@ dependencies = [
  "js-sys",
  "wasm-bindgen",
  "wasm-bindgen-futures",
- "web-sys",
-]
-
-[[package]]
-name = "wasm_thread"
-version = "0.3.3"
-source = "git+https://github.com/zed-industries/wasm_thread?rev=0cf96c7708dfb97ccf3da50347e25edcf75d6937#0cf96c7708dfb97ccf3da50347e25edcf75d6937"
-dependencies = [
- "futures 0.3.32",
- "js-sys",
- "wasm-bindgen",
  "web-sys",
 ]
 
@@ -21079,11 +21067,11 @@ dependencies = [
 name = "watch"
 version = "0.1.0"
 dependencies = [
+ "bezel-gpui",
+ "bezel-zed-zlog",
  "ctor",
  "futures 0.3.32",
- "gpui",
  "parking_lot",
- "zlog",
 ]
 
 [[package]]
@@ -21237,9 +21225,9 @@ name = "web_search"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "bezel-gpui",
+ "bezel-zed-collections",
  "cloud_llm_client",
- "collections",
- "gpui",
  "serde",
 ]
 
@@ -21248,13 +21236,13 @@ name = "web_search_providers"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "bezel-gpui",
+ "bezel-zed-http-client",
  "client",
  "cloud_api_client",
  "cloud_api_types",
  "cloud_llm_client",
  "futures 0.3.32",
- "gpui",
- "http_client",
  "language_model",
  "serde",
  "serde_json",
@@ -21528,8 +21516,8 @@ dependencies = [
 name = "which_key"
 version = "0.1.0"
 dependencies = [
+ "bezel-gpui",
  "command_palette",
- "gpui",
  "serde",
  "settings",
  "theme_settings",
@@ -22796,10 +22784,13 @@ dependencies = [
  "any_vec",
  "anyhow",
  "async-recursion",
+ "bezel-gpui",
+ "bezel-zed-collections",
+ "bezel-zed-http-client",
+ "bezel-zed-zlog",
  "chrono",
  "client",
  "clock",
- "collections",
  "component",
  "db",
  "dirs",
@@ -22807,8 +22798,6 @@ dependencies = [
  "futures 0.3.32",
  "futures-lite 1.13.0",
  "git",
- "gpui",
- "http_client",
  "itertools 0.14.0",
  "language",
  "log",
@@ -22842,7 +22831,6 @@ dependencies = [
  "uuid",
  "windows 0.61.3",
  "zed_actions",
- "zlog",
 ]
 
 [[package]]
@@ -22852,15 +22840,18 @@ dependencies = [
  "anyhow",
  "async-channel 2.5.0",
  "async-lock",
+ "bezel-gpui",
+ "bezel-zed-collections",
+ "bezel-zed-sum-tree",
+ "bezel-zed-zlog",
+ "bezel-zed-ztracing",
  "chardetng",
  "clock",
- "collections",
  "encoding_rs",
  "fs",
  "futures 0.3.32",
  "fuzzy",
  "git",
- "gpui",
  "ignore",
  "language",
  "log",
@@ -22874,21 +22865,18 @@ dependencies = [
  "serde_json",
  "settings",
  "smallvec",
- "sum_tree",
  "text",
  "tracing",
  "util",
  "worktree",
- "zlog",
- "ztracing",
 ]
 
 [[package]]
 name = "worktree_benchmarks"
 version = "0.1.0"
 dependencies = [
+ "bezel-gpui-platform",
  "fs",
- "gpui_platform",
  "settings",
  "worktree",
 ]
@@ -23303,6 +23291,13 @@ dependencies = [
  "audio",
  "auto_update",
  "auto_update_ui",
+ "bezel-gpui",
+ "bezel-gpui-platform",
+ "bezel-zed-collections",
+ "bezel-zed-http-client",
+ "bezel-zed-reqwest-client",
+ "bezel-zed-zlog",
+ "bezel-zed-ztracing",
  "breadcrumbs",
  "call",
  "channel",
@@ -23313,7 +23308,6 @@ dependencies = [
  "clock",
  "codestral",
  "collab_ui",
- "collections",
  "command_palette",
  "component",
  "component_preview",
@@ -23348,11 +23342,8 @@ dependencies = [
  "git_ui",
  "git_ui_core",
  "go_to_line",
- "gpui",
- "gpui_platform",
  "gpui_tokio",
  "hdrhistogram",
- "http_client",
  "image",
  "image_viewer",
  "input_latency_ui",
@@ -23401,7 +23392,6 @@ dependencies = [
  "remote",
  "remote_server",
  "repl",
- "reqwest_client",
  "rope",
  "sandbox",
  "search",
@@ -23455,9 +23445,7 @@ dependencies = [
  "zed_actions",
  "zed_credentials_provider",
  "zed_env_vars",
- "zlog",
  "zlog_settings",
- "ztracing",
 ]
 
 [[package]]
@@ -23571,7 +23559,7 @@ dependencies = [
 name = "zed_actions"
 version = "0.1.0"
 dependencies = [
- "gpui",
+ "bezel-gpui",
  "schemars 1.0.4",
  "serde",
  "util",
@@ -23582,9 +23570,9 @@ name = "zed_credentials_provider"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "bezel-gpui",
  "credentials_provider",
  "futures 0.3.32",
- "gpui",
  "paths",
  "release_channel",
  "serde",
@@ -23813,24 +23801,13 @@ dependencies = [
 ]
 
 [[package]]
-name = "zlog"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "chrono",
- "collections",
- "log",
- "tempfile",
-]
-
-[[package]]
 name = "zlog_settings"
 version = "0.1.0"
 dependencies = [
- "collections",
- "gpui",
+ "bezel-gpui",
+ "bezel-zed-collections",
+ "bezel-zed-zlog",
  "settings",
- "zlog",
 ]
 
 [[package]]
@@ -23861,22 +23838,6 @@ dependencies = [
  "cc",
  "pkg-config",
 ]
-
-[[package]]
-name = "ztracing"
-version = "0.1.0"
-dependencies = [
- "tracing",
- "tracing-subscriber",
- "tracing-tracy",
- "tracy-client",
- "zlog",
- "ztracing_macro",
-]
-
-[[package]]
-name = "ztracing_macro"
-version = "0.1.0"
 
 [[package]]
 name = "zune-core"

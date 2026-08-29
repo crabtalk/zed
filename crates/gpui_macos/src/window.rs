@@ -3281,6 +3281,16 @@ extern "C" fn blurred_view_update_layer(this: &Object, _: Sel) {
         let layer: id = msg_send![this, layer];
         if !layer.is_null() {
             remove_layer_background(layer);
+            // Fallback base BEHIND the backdrop sublayer. Mission Control and
+            // the Spaces switcher render window SNAPSHOTS, which omit backdrop
+            // layers entirely — with every background stripped above, the
+            // window read as fully transparent glass over the raw desktop
+            // there. An opaque dark root background is covered by the live
+            // blur in normal compositing, but keeps the snapshot reading as a
+            // solid dark surface (how stock vibrancy materials degrade).
+            let black: id = msg_send![class!(NSColor), blackColor];
+            let black_cg: id = msg_send![black, CGColor];
+            let _: () = msg_send![layer, setBackgroundColor: black_cg];
         }
     }
 }
@@ -3298,6 +3308,24 @@ unsafe fn remove_layer_background(layer: id) {
 
         let filters: id = msg_send![layer, filters];
         if !filters.is_null() {
+            // Crank the backdrop blur: the material's default gaussian radius
+            // is tuned for thin translucency; the glass shell runs a heavy
+            // scrim over it, and a wider blur under that scrim reads calmer
+            // (user request — lower alpha, more blur).
+            let blur_test: id = ns_string("Blur");
+            let count = NSArray::count(filters);
+            for i in 0..count {
+                let filter = filters.objectAtIndex(i);
+                let description: id = msg_send![filter, description];
+                let hit: BOOL = msg_send![description, containsString: blur_test];
+                if hit == YES {
+                    let radius: id = msg_send![class!(NSNumber), numberWithDouble: 60.0f64];
+                    let _: () =
+                        msg_send![filter, setValue: radius forKey: ns_string("inputRadius")];
+                    let _: () = msg_send![layer, setFilters: filters];
+                    break;
+                }
+            }
             // Remove the increased saturation.
             // The effect of a `CAFilter` or `CIFilter` is determined by its name, and the
             // `description` reflects its name and some parameters. Currently `NSVisualEffectView`

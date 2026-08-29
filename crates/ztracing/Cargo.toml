@@ -1,8 +1,10 @@
 [package]
-name = "ztracing"
-version = "0.1.0"
+name = "bezel-zed-ztracing"
+version = "0.3.0+zed.bc538d"
+description = "ztracing from zed-industries/zed, republished for the bezel gpui fork"
+readme = "README.md"
+repository = "https://github.com/crabtalk/zed"
 edition.workspace = true
-publish.workspace = true
 license = "GPL-3.0-or-later"
 
 [lints]
@@ -10,6 +12,9 @@ workspace = true
 
 [features]
 tracy = ["tracing-tracy", "tracy-client"]
+
+[lib]
+name = "ztracing"
 
 [dependencies]
 zlog.workspace = true

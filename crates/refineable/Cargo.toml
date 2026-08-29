@@ -1,8 +1,9 @@
 [package]
-name = "refineable"
-version = "0.1.0"
+name = "bezel-zed-refineable"
+version = "0.3.0+zed.bc538d"
+readme = "README.md"
+repository = "https://github.com/crabtalk/zed"
 edition.workspace = true
-publish = false
 license = "Apache-2.0"
 description = "A macro for creating 'refinement' types that can be used to partially initialize or mutate a complex struct"
 
@@ -10,6 +11,7 @@ description = "A macro for creating 'refinement' types that can be used to parti
 workspace = true
 
 [lib]
+name = "refineable"
 path = "src/refineable.rs"
 doctest = false
 

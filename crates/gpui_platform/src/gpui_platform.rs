@@ -17,11 +17,29 @@ pub fn application() -> gpui::Application {
     }
 
     #[cfg(not(target_family = "wasm"))]
-    gpui::Application::with_platform(current_platform(false))
+    with_http_client(gpui::Application::with_platform(current_platform(false)))
 }
 
 pub fn headless() -> gpui::Application {
-    gpui::Application::with_platform(current_platform(true))
+    #[cfg(target_family = "wasm")]
+    {
+        gpui::Application::with_platform(current_platform(true))
+    }
+
+    #[cfg(not(target_family = "wasm"))]
+    with_http_client(gpui::Application::with_platform(current_platform(true)))
+}
+
+/// Give an app the platform's HTTP client.
+///
+/// GPUI installs a `NullHttpClient` and leaves the real one to the app, so an
+/// app that skips this paints no remote image at all — and does it silently,
+/// because an element whose fetch failed shows the same fallback as one whose
+/// fetch has not landed yet. The web platform has the browser's own fetch;
+/// everywhere else it is reqwest.
+#[cfg(not(target_family = "wasm"))]
+fn with_http_client(app: gpui::Application) -> gpui::Application {
+    app.with_http_client(std::sync::Arc::new(reqwest_client::ReqwestClient::new()))
 }
 
 #[cfg(target_family = "wasm")]

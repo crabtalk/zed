@@ -132,6 +132,9 @@ struct WgpuPipelines {
     poly_sprites: wgpu::RenderPipeline,
     #[allow(dead_code)]
     surfaces: wgpu::RenderPipeline,
+    backdrop_blurs: wgpu::RenderPipeline,
+    /// Copies the offscreen target back to the surface at end of frame.
+    backdrop_blit: wgpu::RenderPipeline,
 }
 
 /// One frame allocation of instance data, ready to bind.
@@ -152,6 +155,7 @@ struct InstanceBindings {
     monochrome_sprites: InstanceBinding,
     subpixel_sprites: InstanceBinding,
     polychrome_sprites: InstanceBinding,
+    backdrop_blurs: InstanceBinding,
 }
 
 struct WgpuBindGroupLayouts {
@@ -159,6 +163,8 @@ struct WgpuBindGroupLayouts {
     instances: wgpu::BindGroupLayout,
     texture: wgpu::BindGroupLayout,
     surfaces: wgpu::BindGroupLayout,
+    /// The blurred snapshot, the sharp snapshot and their sampler.
+    backdrop: wgpu::BindGroupLayout,
 }
 
 /// Shared GPU context reference, used to coordinate device recovery across multiple windows.
@@ -192,6 +198,16 @@ struct WgpuResources {
     path_intermediate_view: Option<wgpu::TextureView>,
     path_msaa_texture: Option<wgpu::Texture>,
     path_msaa_view: Option<wgpu::TextureView>,
+    /// Where the scene renders on frames that carry a backdrop blur, so the
+    /// blur has something to sample. Frames without one draw to the surface
+    /// directly and allocate none of this.
+    backdrop_target_texture: Option<wgpu::Texture>,
+    backdrop_target_view: Option<wgpu::TextureView>,
+    /// The snapshot the lens reads: a copy of the target taken mid-frame,
+    /// because a pass cannot sample the attachment it is drawing into.
+    backdrop_scratch_texture: Option<wgpu::Texture>,
+    backdrop_scratch_view: Option<wgpu::TextureView>,
+    backdrop_sampler: Option<wgpu::Sampler>,
 }
 
 impl WgpuResources {
@@ -200,6 +216,10 @@ impl WgpuResources {
         self.path_intermediate_view = None;
         self.path_msaa_texture = None;
         self.path_msaa_view = None;
+        self.backdrop_target_texture = None;
+        self.backdrop_target_view = None;
+        self.backdrop_scratch_texture = None;
+        self.backdrop_scratch_view = None;
     }
 }
 
@@ -578,6 +598,11 @@ impl WgpuRenderer {
             path_intermediate_view: None,
             path_msaa_texture: None,
             path_msaa_view: None,
+            backdrop_target_texture: None,
+            backdrop_target_view: None,
+            backdrop_scratch_texture: None,
+            backdrop_scratch_view: None,
+            backdrop_sampler: None,
         };
 
         Ok(Self {
@@ -688,6 +713,38 @@ impl WgpuRenderer {
             ],
         });
 
+        let backdrop = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("backdrop_layout"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 3,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 4,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count: None,
+                },
+            ],
+        });
+
         let surfaces = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("surfaces_layout"),
             entries: &[
@@ -737,6 +794,7 @@ impl WgpuRenderer {
             instances,
             texture,
             surfaces,
+            backdrop,
         }
     }
 
@@ -1054,6 +1112,43 @@ impl WgpuRenderer {
             &shader_module,
         );
 
+        // Blending off: the lens REPLACES the region it covers, which is why
+        // its shader discards outside the rounded bounds rather than
+        // returning a transparent colour.
+        let backdrop_blurs = create_pipeline(
+            "backdrop_blurs",
+            "vs_backdrop_blur",
+            "fs_backdrop_blur",
+            &layouts.globals,
+            &layouts.instances,
+            Some(&layouts.backdrop),
+            wgpu::PrimitiveTopology::TriangleStrip,
+            &[Some(wgpu::ColorTargetState {
+                format: surface_format,
+                blend: None,
+                write_mask: wgpu::ColorWrites::ALL,
+            })],
+            1,
+            &shader_module,
+        );
+
+        let backdrop_blit = create_pipeline(
+            "backdrop_blit",
+            "vs_backdrop_blit",
+            "fs_backdrop_blit",
+            &layouts.globals,
+            &layouts.instances,
+            Some(&layouts.backdrop),
+            wgpu::PrimitiveTopology::TriangleStrip,
+            &[Some(wgpu::ColorTargetState {
+                format: surface_format,
+                blend: None,
+                write_mask: wgpu::ColorWrites::ALL,
+            })],
+            1,
+            &shader_module,
+        );
+
         WgpuPipelines {
             quads,
             shadows,
@@ -1064,7 +1159,98 @@ impl WgpuRenderer {
             subpixel_sprites,
             poly_sprites,
             surfaces,
+            backdrop_blurs,
+            backdrop_blit,
         }
+    }
+
+    /// The offscreen target and the snapshot the lens samples, both at surface
+    /// size. Allocated on the first frame that carries a backdrop blur and
+    /// dropped with the other intermediates on resize.
+    fn ensure_backdrop_textures(&mut self) {
+        if self.resources().backdrop_target_texture.is_some() {
+            return;
+        }
+        let format = self.surface_config.format;
+        let width = self.surface_config.width.max(1);
+        let height = self.surface_config.height.max(1);
+        let size = wgpu::Extent3d {
+            width,
+            height,
+            depth_or_array_layers: 1,
+        };
+        let resources = self.resources_mut();
+        let target = resources.device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("backdrop_target"),
+            size,
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+                | wgpu::TextureUsages::TEXTURE_BINDING
+                | wgpu::TextureUsages::COPY_SRC,
+            view_formats: &[],
+        });
+        let scratch = resources.device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("backdrop_scratch"),
+            size,
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+        resources.backdrop_target_view =
+            Some(target.create_view(&wgpu::TextureViewDescriptor::default()));
+        resources.backdrop_scratch_view =
+            Some(scratch.create_view(&wgpu::TextureViewDescriptor::default()));
+        resources.backdrop_target_texture = Some(target);
+        resources.backdrop_scratch_texture = Some(scratch);
+        if resources.backdrop_sampler.is_none() {
+            resources.backdrop_sampler =
+                Some(resources.device.create_sampler(&wgpu::SamplerDescriptor {
+                    label: Some("backdrop_sampler"),
+                    // Clamp: the default wrap bleeds the far edge into a blur
+                    // that reaches past the window border.
+                    address_mode_u: wgpu::AddressMode::ClampToEdge,
+                    address_mode_v: wgpu::AddressMode::ClampToEdge,
+                    address_mode_w: wgpu::AddressMode::ClampToEdge,
+                    mag_filter: wgpu::FilterMode::Linear,
+                    min_filter: wgpu::FilterMode::Linear,
+                    ..Default::default()
+                }));
+        }
+    }
+
+    /// Binds the snapshot for both samplers. Without a gaussian on this backend
+    /// the blurred slot is the sharp copy, which is exactly what liquid glass
+    /// asks for — `blur_radius` 0 means the lens wants no frost.
+    fn backdrop_bind_group(&self) -> wgpu::BindGroup {
+        let resources = self.resources();
+        let scratch = resources.backdrop_scratch_view.as_ref().unwrap();
+        let sampler = resources.backdrop_sampler.as_ref().unwrap();
+        resources
+            .device
+            .create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("backdrop_bind_group"),
+                layout: &resources.bind_group_layouts.backdrop,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: wgpu::BindingResource::TextureView(scratch),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 3,
+                        resource: wgpu::BindingResource::TextureView(scratch),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 4,
+                        resource: wgpu::BindingResource::Sampler(sampler),
+                    },
+                ],
+            })
     }
 
     fn create_path_intermediate(
@@ -1341,9 +1527,26 @@ impl WgpuRenderer {
         // Now that we know the surface is healthy, ensure intermediate textures exist
         self.ensure_intermediate_textures();
 
-        let frame_view = frame
+        // A backdrop blur samples what was painted below it, and a pass cannot
+        // sample the attachment it is drawing into. Frames that carry one go to
+        // an offscreen target and are blitted back at the end; frames without
+        // one draw straight to the surface and allocate nothing.
+        let lensed = !scene.backdrop_blurs.is_empty();
+        if lensed {
+            self.ensure_backdrop_textures();
+        }
+        let surface_view = frame
             .texture
             .create_view(&wgpu::TextureViewDescriptor::default());
+        let frame_view = if lensed {
+            self.resources()
+                .backdrop_target_view
+                .as_ref()
+                .expect("backdrop target created above")
+                .clone()
+        } else {
+            surface_view.clone()
+        };
 
         let gamma_params = GammaParams {
             gamma_ratios: self.rendering_params.gamma_ratios,
@@ -1392,7 +1595,11 @@ impl WgpuRenderer {
             );
         }
 
-        if let Err(error) = self.record_frame(scene, &frame_view) {
+        if let Err(error) = self.record_frame(
+            scene,
+            &frame_view,
+            if lensed { Some(&surface_view) } else { None },
+        ) {
             log::error!("{error:#}");
             self.resources().queue.submit(std::iter::empty());
             return false;
@@ -1402,7 +1609,14 @@ impl WgpuRenderer {
         true
     }
 
-    fn record_frame(&mut self, scene: &Scene, frame_view: &wgpu::TextureView) -> Result<()> {
+    /// `blit_to` is the surface when the scene rendered offscreen for a
+    /// backdrop blur, and `None` when it drew to the surface directly.
+    fn record_frame(
+        &mut self,
+        scene: &Scene,
+        frame_view: &wgpu::TextureView,
+        blit_to: Option<&wgpu::TextureView>,
+    ) -> Result<()> {
         let mut instance_offset = 0;
         let instance_bindings = self
             .write_instances(scene, &mut instance_offset)
@@ -1442,7 +1656,34 @@ impl WgpuRenderer {
                 ..Default::default()
             });
 
+            let mut pending_blurs = scene.backdrop_blurs.iter().enumerate().peekable();
             for batch in scene.batches() {
+                // Backdrop blurs interleave by draw order OUTSIDE the batch
+                // stream: end the pass, snapshot what has been painted, and
+                // paint the lensed region back before carrying on.
+                while pending_blurs
+                    .peek()
+                    .is_some_and(|(_, blur)| blur.order <= scene.batch_first_order(&batch))
+                {
+                    let (blur_index, _) = pending_blurs.next().unwrap();
+                    drop(pass);
+                    self.snapshot_backdrop(&mut encoder);
+                    pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                        label: Some("main_pass_backdrop"),
+                        color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                            view: frame_view,
+                            resolve_target: None,
+                            ops: wgpu::Operations {
+                                load: wgpu::LoadOp::Load,
+                                store: wgpu::StoreOp::Store,
+                            },
+                            depth_slice: None,
+                        })],
+                        depth_stencil_attachment: None,
+                        ..Default::default()
+                    });
+                    self.draw_backdrop_blur(&instance_bindings.backdrop_blurs, blur_index, &mut pass);
+                }
                 match batch {
                     PrimitiveBatch::Quads(range) => self.draw_instances(
                         &instance_bindings.quads,
@@ -1533,10 +1774,76 @@ impl WgpuRenderer {
             }
         }
 
+        // The offscreen target back onto the surface, once.
+        if let Some(surface_view) = blit_to {
+            self.snapshot_backdrop(&mut encoder);
+            let backdrop = self.backdrop_bind_group();
+            let resources = self.resources();
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("backdrop_blit_pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: surface_view,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
+                        store: wgpu::StoreOp::Store,
+                    },
+                    depth_slice: None,
+                })],
+                depth_stencil_attachment: None,
+                ..Default::default()
+            });
+            pass.set_pipeline(&resources.pipelines.backdrop_blit);
+            pass.set_bind_group(0, &resources.globals_bind_group, &[]);
+            // The shader ignores group 1, but the pipeline layout declares it
+            // and every group in a layout has to be bound before a draw.
+            pass.set_bind_group(1, &instance_bindings.backdrop_blurs.bind_group, &[]);
+            pass.set_bind_group(2, &backdrop, &[]);
+            pass.draw(0..4, 0..1);
+        }
+
         self.resources()
             .queue
             .submit(std::iter::once(encoder.finish()));
         Ok(())
+    }
+
+    /// Copy the offscreen target into the scratch the lens samples. A pass
+    /// cannot read the attachment it writes, so the snapshot is a separate
+    /// texture rather than the target itself.
+    fn snapshot_backdrop(&self, encoder: &mut wgpu::CommandEncoder) {
+        let resources = self.resources();
+        let (Some(target), Some(scratch)) = (
+            resources.backdrop_target_texture.as_ref(),
+            resources.backdrop_scratch_texture.as_ref(),
+        ) else {
+            return;
+        };
+        encoder.copy_texture_to_texture(
+            target.as_image_copy(),
+            scratch.as_image_copy(),
+            wgpu::Extent3d {
+                width: self.surface_config.width.max(1),
+                height: self.surface_config.height.max(1),
+                depth_or_array_layers: 1,
+            },
+        );
+    }
+
+    fn draw_backdrop_blur(
+        &self,
+        binding: &InstanceBinding,
+        blur_index: usize,
+        pass: &mut wgpu::RenderPass<'_>,
+    ) {
+        let backdrop = self.backdrop_bind_group();
+        let resources = self.resources();
+        pass.set_pipeline(&resources.pipelines.backdrop_blurs);
+        pass.set_bind_group(0, &resources.globals_bind_group, &[]);
+        pass.set_bind_group(1, &binding.bind_group, &[]);
+        pass.set_bind_group(2, &backdrop, &[]);
+        let first = binding.first_instance + blur_index as u32;
+        pass.draw(0..4, first..first + 1);
     }
 
     fn write_instances(
@@ -1574,6 +1881,11 @@ impl WgpuRenderer {
                 "polychrome_sprites_bind_group",
                 instance_offset,
                 &scene.polychrome_sprites,
+            )?,
+            backdrop_blurs: self.write_instance_binding(
+                "backdrop_blurs_bind_group",
+                instance_offset,
+                &scene.backdrop_blurs,
             )?,
         })
     }

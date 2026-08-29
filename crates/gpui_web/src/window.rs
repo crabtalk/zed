@@ -56,7 +56,6 @@ pub(crate) struct WebWindowInner {
     pub(crate) last_physical_size: Cell<(u32, u32)>,
     pub(crate) notify_scale: Cell<bool>,
     pub(crate) is_composing: Cell<bool>,
-    wants_text: Cell<bool>,
     mql_handle: RefCell<Option<MqlHandle>>,
     pending_physical_size: Cell<Option<(u32, u32)>>,
     raf_id: Cell<Option<i32>>,
@@ -144,10 +143,6 @@ impl WebWindow {
             .map_err(|e| anyhow::anyhow!("Failed to create input element: {e:?}"))?
             .dyn_into()
             .map_err(|e| anyhow::anyhow!("Created element is not an input: {e:?}"))?;
-        // The element exists to receive key and composition events, not to be
-        // typed into directly, so a touch device must not raise its on-screen
-        // keyboard until a view actually asks for text.
-        input_element.set_attribute("inputmode", "none").ok();
         let input_style = input_element.style();
         input_style.set_property("position", "fixed").ok();
         input_style.set_property("top", "0").ok();
@@ -196,7 +191,6 @@ impl WebWindow {
             last_physical_size: Cell::new((0, 0)),
             notify_scale: Cell::new(false),
             is_composing: Cell::new(false),
-            wants_text: Cell::new(false),
             mql_handle: RefCell::new(None),
             pending_physical_size: Cell::new(None),
             raf_id: Cell::new(None),
@@ -368,7 +362,6 @@ impl WebWindowInner {
                     })
                 },
             );
-            this.sync_virtual_keyboard();
         });
 
         let js_func: js_sys::Function =
@@ -376,20 +369,6 @@ impl WebWindowInner {
         *self.raf_function.borrow_mut() = Some(js_func);
 
         closure
-    }
-
-    /// Offers the on-screen keyboard only while a focused view wants text.
-    ///
-    /// Drawing takes the input handler and puts it back on every frame, so the
-    /// settled answer is the one readable once a frame has finished.
-    fn sync_virtual_keyboard(&self) {
-        let wants_text = self.state.borrow().input_handler.is_some();
-        if self.wants_text.replace(wants_text) == wants_text {
-            return;
-        }
-        self.input_element
-            .set_attribute("inputmode", if wants_text { "text" } else { "none" })
-            .ok();
     }
 
     pub(crate) fn wake_frame_loop(&self) {

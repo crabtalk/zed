@@ -28,7 +28,19 @@ use objc::{self, class, msg_send, sel, sel_impl};
 unsafe extern "C" {}
 use parking_lot::Mutex;
 
-use std::{cell::Cell, ffi::c_void, mem, mem::MaybeUninit, ops::Range, ptr, slice, sync::Arc};
+use std::{
+    cell::Cell,
+    ffi::c_void,
+    mem,
+    mem::MaybeUninit,
+    ops::Range,
+    ptr, slice,
+    sync::{
+        Arc,
+        atomic::{AtomicU64, Ordering},
+    },
+    time::Duration,
+};
 
 // Exported to metal
 pub(crate) type PointF = gpui::Point<f32>;
@@ -139,6 +151,10 @@ pub struct MetalRenderer {
     unit_vertices: metal::Buffer,
     #[allow(clippy::arc_with_non_send_sync)]
     instance_buffer_pool: Arc<Mutex<InstanceBufferPool>>,
+    /// Nanoseconds the GPU has spent on this window's frames, summed over every
+    /// one that has completed. Written from the command buffer's completion
+    /// handler, which Metal calls on a thread of its own.
+    gpu_time: Arc<AtomicU64>,
     sprite_atlas: Arc<MetalAtlas>,
     core_video_texture_cache: core_video::metal_texture_cache::CVMetalTextureCache,
     path_intermediate_texture: Option<metal::Texture>,
@@ -371,6 +387,7 @@ impl MetalRenderer {
             surfaces_pipeline_state,
             unit_vertices,
             instance_buffer_pool,
+            gpu_time: Arc::new(AtomicU64::new(0)),
             sprite_atlas,
             core_video_texture_cache,
             path_intermediate_texture: None,
@@ -544,15 +561,40 @@ impl MetalRenderer {
 
         let instance_buffer_pool = self.instance_buffer_pool.clone();
         let instance_buffer = Cell::new(Some(writer.finish()));
-        let block = ConcreteBlock::new(move |_| {
+        let gpu_time = self.gpu_time.clone();
+        let block = ConcreteBlock::new(move |command_buffer: &metal::CommandBufferRef| {
             if let Some(instance_buffer) = instance_buffer.take() {
                 instance_buffer_pool.lock().release(instance_buffer);
             }
+            // Both are CFTimeInterval seconds, and both read 0 on a command
+            // buffer the GPU never ran, which is the same 0 that means "no
+            // reading yet" to `gpu_time`.
+            // SAFETY: the handler runs after completion, which is the only
+            // point at which these two are defined.
+            let (start, end): (f64, f64) = unsafe {
+                (
+                    msg_send![command_buffer, GPUStartTime],
+                    msg_send![command_buffer, GPUEndTime],
+                )
+            };
+            let elapsed = (end - start).max(0.0) * 1e9;
+            gpu_time.fetch_add(elapsed as u64, Ordering::Relaxed);
         });
         let block = block.copy();
         command_buffer.add_completed_handler(&block);
 
         Ok(command_buffer)
+    }
+
+    /// How long the GPU has spent on this window's frames since it opened. A
+    /// counter to take differences of, the way `getrusage` reports CPU time;
+    /// the frame just submitted is not in it yet, since `draw` returns at
+    /// `commit` and the work completes after it. `None` until one has.
+    pub fn gpu_time(&self) -> Option<Duration> {
+        match self.gpu_time.load(Ordering::Relaxed) {
+            0 => None,
+            nanos => Some(Duration::from_nanos(nanos)),
+        }
     }
 
     /// Renders the scene to a texture and returns the pixel data as an RGBA image.

@@ -89,6 +89,27 @@ impl Scene {
         self.paint_operations.push(PaintOperation::EndLayer);
     }
 
+    /// The draw order of a batch's first primitive. Backdrop blurs sit outside
+    /// the batch stream, so this is what interleaves them back into it.
+    pub fn batch_first_order(&self, batch: &PrimitiveBatch) -> DrawOrder {
+        match batch {
+            PrimitiveBatch::Shadows(range) => self.shadows[range.start].order,
+            PrimitiveBatch::Quads(range) => self.quads[range.start].order,
+            PrimitiveBatch::Paths(range) => self.paths[range.start].order,
+            PrimitiveBatch::Underlines(range) => self.underlines[range.start].order,
+            PrimitiveBatch::MonochromeSprites { range, .. } => {
+                self.monochrome_sprites[range.start].order
+            }
+            PrimitiveBatch::SubpixelSprites { range, .. } => {
+                self.subpixel_sprites[range.start].order
+            }
+            PrimitiveBatch::PolychromeSprites { range, .. } => {
+                self.polychrome_sprites[range.start].order
+            }
+            PrimitiveBatch::Surfaces(range) => self.surfaces[range.start].order,
+        }
+    }
+
     pub fn insert_backdrop_blur(&mut self, mut blur: BackdropBlur) {
         let clipped_bounds = blur.bounds.intersect(&blur.content_mask.bounds);
         if clipped_bounds.is_empty() {
@@ -593,8 +614,8 @@ impl From<Underline> for Primitive {
 
 /// A within-window backdrop blur region: the renderer snapshots everything
 /// painted below this order and paints it back gaussian-blurred inside the
-/// rounded bounds (frosted-glass popovers). macOS Metal only — see
-/// [`crate::Window::paint_backdrop_blur`].
+/// rounded bounds (frosted-glass popovers). Implemented by the Metal and wgpu
+/// renderers — see [`crate::Window::paint_backdrop_blur`].
 #[derive(Debug, Copy, Clone)]
 #[repr(C)]
 #[expect(missing_docs)]

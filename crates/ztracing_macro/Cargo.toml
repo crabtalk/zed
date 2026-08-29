@@ -1,6 +1,6 @@
 [package]
 name = "bezel-zed-ztracing-macro"
-version = "0.3.5+zed.d9ad6a"
+version = "0.3.6+zed.d9ad6a"
 description = "ztracing_macro from zed-industries/zed, republished for the bezel gpui fork"
 readme = "README.md"
 repository = "https://github.com/crabtalk/zed"

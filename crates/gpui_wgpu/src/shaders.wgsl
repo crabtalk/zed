@@ -1516,9 +1516,23 @@ fn fs_backdrop_blit(input: BackdropBlitVarying) -> @location(0) vec4<f32> {
 // pass draws with `instance_index` set to the blur's own index.
 
 const BACKDROP_DOWNSAMPLE: f32 = 4.0;
+/// Sigma, in full-resolution device pixels, below which the blur runs at full
+/// resolution. The reduced path's own downsample is a blur of about
+/// `BACKDROP_DOWNSAMPLE` pixels, which under this would be most of the result
+/// rather than a cheapening of it. Must match `BACKDROP_SMALL_SIGMA` in
+/// `wgpu_renderer.rs`, which picks the textures these passes render into.
+const BACKDROP_SMALL_SIGMA: f32 = 16.0;
 /// Ceiling on the half-kernel, in reduced-resolution texels. A true gaussian
 /// wants 3 sigma; past this the tail is clipped rather than the loop unbounded.
-const BACKDROP_MAX_TAPS: i32 = 64;
+const BACKDROP_MAX_TAPS: i32 = 72;
+
+/// How many full-resolution pixels one step of the blur covers.
+fn backdrop_scale(blur_radius: f32) -> f32 {
+    if (blur_radius <= BACKDROP_SMALL_SIGMA) {
+        return 1.0;
+    }
+    return BACKDROP_DOWNSAMPLE;
+}
 
 struct BackdropGaussVarying {
     @builtin(position) position: vec4<f32>,
@@ -1538,14 +1552,20 @@ fn vs_backdrop_gauss(@builtin(vertex_index) vertex_id: u32, @builtin(instance_in
 
 @fragment
 fn fs_backdrop_downsample(input: BackdropGaussVarying) -> @location(0) vec4<f32> {
-    // Four bilinear taps, each averaging a 2x2 of the full-resolution snapshot,
-    // so one reduced texel carries the 4x4 block it stands for. Point sampling
-    // here is what ghosts on text.
-    let texel = 1.0 / globals.viewport_size;
-    var sum = textureSampleLevel(t_backdrop, s_backdrop, input.uv + vec2<f32>(-texel.x, -texel.y), 0.0);
-    sum = sum + textureSampleLevel(t_backdrop, s_backdrop, input.uv + vec2<f32>(texel.x, -texel.y), 0.0);
-    sum = sum + textureSampleLevel(t_backdrop, s_backdrop, input.uv + vec2<f32>(-texel.x, texel.y), 0.0);
-    sum = sum + textureSampleLevel(t_backdrop, s_backdrop, input.uv + vec2<f32>(texel.x, texel.y), 0.0);
+    let blur = load_backdrop_blur(input.blur_id);
+    let scale = backdrop_scale(blur.blur_radius);
+    if (scale <= 1.0) {
+        // Full resolution: the gaussian steps texel by texel, so there is
+        // nothing to prefilter and softening here would be blur nobody asked for.
+        return textureSampleLevel(t_backdrop, s_backdrop, input.uv, 0.0);
+    }
+    // Four bilinear taps, each averaging a 2x2, so one reduced texel carries the
+    // whole block it stands for. Point sampling here is what ghosts on text.
+    let offset = (scale * 0.25) / globals.viewport_size;
+    var sum = textureSampleLevel(t_backdrop, s_backdrop, input.uv + vec2<f32>(-offset.x, -offset.y), 0.0);
+    sum = sum + textureSampleLevel(t_backdrop, s_backdrop, input.uv + vec2<f32>(offset.x, -offset.y), 0.0);
+    sum = sum + textureSampleLevel(t_backdrop, s_backdrop, input.uv + vec2<f32>(-offset.x, offset.y), 0.0);
+    sum = sum + textureSampleLevel(t_backdrop, s_backdrop, input.uv + vec2<f32>(offset.x, offset.y), 0.0);
     return sum * 0.25;
 }
 
@@ -1553,8 +1573,9 @@ fn backdrop_gauss(uv: vec2<f32>, blur_id: u32, axis: vec2<f32>) -> vec4<f32> {
     let blur = load_backdrop_blur(blur_id);
     // Sigma is given in full-resolution device pixels; one step here is one
     // texel of the reduced target, which is `BACKDROP_DOWNSAMPLE` of those.
-    let sigma = max(blur.blur_radius / BACKDROP_DOWNSAMPLE, 1e-3);
-    let step_uv = axis * BACKDROP_DOWNSAMPLE / globals.viewport_size;
+    let scale = backdrop_scale(blur.blur_radius);
+    let sigma = max(blur.blur_radius / scale, 1e-3);
+    let step_uv = axis * scale / globals.viewport_size;
     let radius = min(i32(ceil(sigma * 3.0)), BACKDROP_MAX_TAPS);
 
     var total = textureSampleLevel(t_backdrop, s_backdrop, uv, 0.0);

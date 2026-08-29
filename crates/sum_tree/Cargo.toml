@@ -22,7 +22,7 @@ log.workspace = true
 ztracing.workspace = true
 tracing.workspace = true
 
-[package.metadata.cargo-machete]
+[package.metadata.cargo-shear]
 ignored = ["tracing"]
 
 [features]

@@ -24,6 +24,9 @@ x11 = ["gpui_linux/x11"]
 [dependencies]
 gpui.workspace = true
 
+[target.'cfg(not(target_family = "wasm"))'.dependencies]
+reqwest_client.workspace = true
+
 [target.'cfg(target_os = "macos")'.dependencies]
 gpui_macos.workspace = true
 

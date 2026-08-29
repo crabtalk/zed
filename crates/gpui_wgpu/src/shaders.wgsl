@@ -1360,3 +1360,242 @@ fn fs_surface(input: SurfaceVarying) -> @location(0) vec4<f32> {
 
     return ycbcr_to_RGB * y_cb_cr;
 }
+
+// --- BackdropBlur ------------------------------------------------------------
+// The snapshot of everything painted below this order, sampled back inside the
+// rounded bounds. `t_backdrop` is that snapshot gaussian-blurred (or the sharp
+// copy again when `blur_radius` is 0, which is what liquid glass asks for);
+// `t_backdrop_sharp` is always the unblurred one.
+
+@group(2) @binding(2) var t_backdrop: texture_2d<f32>;
+@group(2) @binding(3) var t_backdrop_sharp: texture_2d<f32>;
+@group(2) @binding(4) var s_backdrop: sampler;
+
+struct BackdropBlur {
+    order: u32,
+    blur_radius: f32,
+    bounds: Bounds,
+    content_mask: Bounds,
+    corner_radii: Corners,
+    lens: f32,
+    magnify: f32,
+    dispersion: f32,
+    tint: Hsla,
+    hairline: f32,
+}
+
+struct BackdropBlurVarying {
+    @builtin(position) position: vec4<f32>,
+    @location(0) @interpolate(flat) blur_id: u32,
+    @location(1) clip_distances: vec4<f32>,
+}
+
+@vertex
+fn vs_backdrop_blur(@builtin(vertex_index) vertex_id: u32, @builtin(instance_index) instance_id: u32) -> BackdropBlurVarying {
+    let unit_vertex = vec2<f32>(f32(vertex_id & 1u), 0.5 * f32(vertex_id & 2u));
+    let blur = load_backdrop_blur(instance_id);
+
+    var out: BackdropBlurVarying;
+    out.position = to_device_position(unit_vertex, blur.bounds);
+    out.blur_id = instance_id;
+    out.clip_distances = distance_from_clip_rect(unit_vertex, blur.bounds, blur.content_mask);
+    return out;
+}
+
+@fragment
+fn fs_backdrop_blur(input: BackdropBlurVarying) -> @location(0) vec4<f32> {
+    // Blending is disabled on this pipeline — the blur REPLACES the region — so
+    // fragments outside must discard rather than return a transparent colour.
+    if (any(input.clip_distances < vec4<f32>(0.0))) {
+        discard;
+    }
+
+    let blur = load_backdrop_blur(input.blur_id);
+    let distance = quad_sdf(input.position.xy, blur.bounds, blur.corner_radii);
+    if (distance > 0.0) {
+        discard;
+    }
+
+    let viewport = globals.viewport_size;
+    let point = input.position.xy;
+    let tint = hsla_to_rgba(blur.tint);
+    // Measured off NSGlassEffectView across five backdrop levels (2026-08):
+    // interior = 1.042 * backdrop + 19/255.
+    var gain = 1.0;
+    if (tint.a > 0.0) {
+        gain = 1.042;
+    }
+
+    let bevel = blur.lens;
+    var depth = 1.0;
+    if (bevel > 0.0) {
+        depth = clamp(-distance / bevel, 0.0, 1.0);
+    }
+    if (depth >= 1.0) {
+        let flat_color = textureSampleLevel(t_backdrop, s_backdrop, point / viewport, 0.0);
+        return vec4<f32>(flat_color.rgb * gain + tint.rgb * tint.a, flat_color.a);
+    }
+
+    // Outward normal of the rounded rect: the SDF's gradient by central
+    // difference, so corners bend along their true radius.
+    let gradient = vec2<f32>(
+        quad_sdf(point + vec2<f32>(1.0, 0.0), blur.bounds, blur.corner_radii)
+            - quad_sdf(point - vec2<f32>(1.0, 0.0), blur.bounds, blur.corner_radii),
+        quad_sdf(point + vec2<f32>(0.0, 1.0), blur.bounds, blur.corner_radii)
+            - quad_sdf(point - vec2<f32>(0.0, 1.0), blur.bounds, blur.corner_radii),
+    );
+    let gradient_length = length(gradient);
+    var outward = vec2<f32>(0.0);
+    if (gradient_length > 0.0) {
+        outward = gradient / gradient_length;
+    }
+
+    // A dome, not a bezel on the edge: slope grows from flat at the centre-line
+    // to vertical at the rim. The epsilon keeps that divergence finite.
+    let rise = 1.0 - depth;
+    let slope = rise / sqrt(max(1.0 - rise * rise, 1e-4));
+    var step_v = -outward * slope * bevel * blur.magnify;
+    // A 460x120 capsule over a 12pt ruler displaces at most ~12pt against a
+    // 27pt bevel, so the rim reaches a little under half its own depth.
+    let limit = bevel * 0.45;
+    let reach = length(step_v);
+    if (reach > limit) {
+        step_v = step_v * (limit / reach);
+    }
+
+    // Frost in the middle, a sharp bent image at the rim — the interior is what
+    // rows are read against, the edge is what makes it look like glass.
+    let sharpness = (1.0 - depth) * (1.0 - depth);
+    let uv_r = (point + step_v * (1.0 - blur.dispersion)) / viewport;
+    let uv_g = (point + step_v) / viewport;
+    let uv_b = (point + step_v * (1.0 + blur.dispersion)) / viewport;
+    let lensed = vec3<f32>(
+        mix(textureSampleLevel(t_backdrop, s_backdrop, uv_r, 0.0).r,
+            textureSampleLevel(t_backdrop_sharp, s_backdrop, uv_r, 0.0).r, sharpness),
+        mix(textureSampleLevel(t_backdrop, s_backdrop, uv_g, 0.0).g,
+            textureSampleLevel(t_backdrop_sharp, s_backdrop, uv_g, 0.0).g, sharpness),
+        mix(textureSampleLevel(t_backdrop, s_backdrop, uv_b, 0.0).b,
+            textureSampleLevel(t_backdrop_sharp, s_backdrop, uv_b, 0.0).b, sharpness),
+    );
+
+    var color = lensed * gain + tint.rgb * tint.a;
+    // The lit edge is a hairline, not a bevel gradient: one pixel wide at every
+    // size and over every backdrop, dimmer where it faces up.
+    let hair = 1.0 - smoothstep(0.0, blur.hairline * 1.5, -distance);
+    let facing_up = clamp(-outward.y, 0.0, 1.0);
+    color = color + hair * (1.0 - 0.18 * facing_up) * 0.18;
+    return vec4<f32>(color, 1.0);
+}
+
+// The offscreen target copied back to the surface, once, at end of frame. Only
+// frames carrying a backdrop blur render offscreen at all, so this never runs
+// for a scene without glass in it.
+struct BackdropBlitVarying {
+    @builtin(position) position: vec4<f32>,
+    @location(0) uv: vec2<f32>,
+}
+
+@vertex
+fn vs_backdrop_blit(@builtin(vertex_index) vertex_id: u32) -> BackdropBlitVarying {
+    let unit_vertex = vec2<f32>(f32(vertex_id & 1u), 0.5 * f32(vertex_id & 2u));
+    var out: BackdropBlitVarying;
+    out.position = vec4<f32>(unit_vertex * vec2<f32>(2.0, -2.0) + vec2<f32>(-1.0, 1.0), 0.0, 1.0);
+    out.uv = unit_vertex;
+    return out;
+}
+
+@fragment
+fn fs_backdrop_blit(input: BackdropBlitVarying) -> @location(0) vec4<f32> {
+    return textureSampleLevel(t_backdrop_sharp, s_backdrop, input.uv, 0.0);
+}
+
+// --- Backdrop gaussian -------------------------------------------------------
+// Metal hands this to MPSImageGaussianBlur; wgpu has no equivalent and WebGL2
+// has no compute, so it runs as three fragment passes at reduced resolution:
+// downsample, horizontal, vertical. Sigma rides the instance transport — the
+// pass draws with `instance_index` set to the blur's own index.
+
+const BACKDROP_DOWNSAMPLE: f32 = 4.0;
+/// Sigma, in full-resolution device pixels, below which the blur runs at full
+/// resolution. The reduced path's own downsample is a blur of about
+/// `BACKDROP_DOWNSAMPLE` pixels, which under this would be most of the result
+/// rather than a cheapening of it. Must match `BACKDROP_SMALL_SIGMA` in
+/// `wgpu_renderer.rs`, which picks the textures these passes render into.
+const BACKDROP_SMALL_SIGMA: f32 = 16.0;
+/// Ceiling on the half-kernel, in reduced-resolution texels. A true gaussian
+/// wants 3 sigma; past this the tail is clipped rather than the loop unbounded.
+const BACKDROP_MAX_TAPS: i32 = 72;
+
+/// How many full-resolution pixels one step of the blur covers.
+fn backdrop_scale(blur_radius: f32) -> f32 {
+    if (blur_radius <= BACKDROP_SMALL_SIGMA) {
+        return 1.0;
+    }
+    return BACKDROP_DOWNSAMPLE;
+}
+
+struct BackdropGaussVarying {
+    @builtin(position) position: vec4<f32>,
+    @location(0) uv: vec2<f32>,
+    @location(1) @interpolate(flat) blur_id: u32,
+}
+
+@vertex
+fn vs_backdrop_gauss(@builtin(vertex_index) vertex_id: u32, @builtin(instance_index) instance_id: u32) -> BackdropGaussVarying {
+    let unit_vertex = vec2<f32>(f32(vertex_id & 1u), 0.5 * f32(vertex_id & 2u));
+    var out: BackdropGaussVarying;
+    out.position = vec4<f32>(unit_vertex * vec2<f32>(2.0, -2.0) + vec2<f32>(-1.0, 1.0), 0.0, 1.0);
+    out.uv = unit_vertex;
+    out.blur_id = instance_id;
+    return out;
+}
+
+@fragment
+fn fs_backdrop_downsample(input: BackdropGaussVarying) -> @location(0) vec4<f32> {
+    let blur = load_backdrop_blur(input.blur_id);
+    let scale = backdrop_scale(blur.blur_radius);
+    if (scale <= 1.0) {
+        // Full resolution: the gaussian steps texel by texel, so there is
+        // nothing to prefilter and softening here would be blur nobody asked for.
+        return textureSampleLevel(t_backdrop, s_backdrop, input.uv, 0.0);
+    }
+    // Four bilinear taps, each averaging a 2x2, so one reduced texel carries the
+    // whole block it stands for. Point sampling here is what ghosts on text.
+    let offset = (scale * 0.25) / globals.viewport_size;
+    var sum = textureSampleLevel(t_backdrop, s_backdrop, input.uv + vec2<f32>(-offset.x, -offset.y), 0.0);
+    sum = sum + textureSampleLevel(t_backdrop, s_backdrop, input.uv + vec2<f32>(offset.x, -offset.y), 0.0);
+    sum = sum + textureSampleLevel(t_backdrop, s_backdrop, input.uv + vec2<f32>(-offset.x, offset.y), 0.0);
+    sum = sum + textureSampleLevel(t_backdrop, s_backdrop, input.uv + vec2<f32>(offset.x, offset.y), 0.0);
+    return sum * 0.25;
+}
+
+fn backdrop_gauss(uv: vec2<f32>, blur_id: u32, axis: vec2<f32>) -> vec4<f32> {
+    let blur = load_backdrop_blur(blur_id);
+    // Sigma is given in full-resolution device pixels; one step here is one
+    // texel of the reduced target, which is `BACKDROP_DOWNSAMPLE` of those.
+    let scale = backdrop_scale(blur.blur_radius);
+    let sigma = max(blur.blur_radius / scale, 1e-3);
+    let step_uv = axis * scale / globals.viewport_size;
+    let radius = min(i32(ceil(sigma * 3.0)), BACKDROP_MAX_TAPS);
+
+    var total = textureSampleLevel(t_backdrop, s_backdrop, uv, 0.0);
+    var weight_sum = 1.0;
+    for (var i = 1; i <= radius; i = i + 1) {
+        let offset = step_uv * f32(i);
+        let weight = exp(-0.5 * f32(i) * f32(i) / (sigma * sigma));
+        total = total + textureSampleLevel(t_backdrop, s_backdrop, uv + offset, 0.0) * weight;
+        total = total + textureSampleLevel(t_backdrop, s_backdrop, uv - offset, 0.0) * weight;
+        weight_sum = weight_sum + 2.0 * weight;
+    }
+    return total / weight_sum;
+}
+
+@fragment
+fn fs_backdrop_gauss_h(input: BackdropGaussVarying) -> @location(0) vec4<f32> {
+    return backdrop_gauss(input.uv, input.blur_id, vec2<f32>(1.0, 0.0));
+}
+
+@fragment
+fn fs_backdrop_gauss_v(input: BackdropGaussVarying) -> @location(0) vec4<f32> {
+    return backdrop_gauss(input.uv, input.blur_id, vec2<f32>(0.0, 1.0));
+}

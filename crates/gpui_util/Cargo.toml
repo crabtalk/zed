@@ -1,6 +1,6 @@
 [package]
 name = "bezel-gpui-util"
-version = "0.3.0+zed.bc538d"
+version = "0.3.1+zed.d9ad6a"
 description = "gpui_util from zed-industries/zed, republished for the bezel gpui fork"
 license = "Apache-2.0"
 readme = "README.md"

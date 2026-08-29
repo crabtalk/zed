@@ -1,4 +1,8 @@
 const BACKDROP_DOWNSAMPLE: u32 = 4;
+/// Sigma, in device pixels, below which the blur runs at full resolution
+/// rather than through the reduced pair. Must match `BACKDROP_SMALL_SIGMA`
+/// in `shaders.wgsl`, which derives the same choice from the same field.
+const BACKDROP_SMALL_SIGMA: f32 = 16.0;
 
 use crate::{CompositorGpuHint, WgpuAtlas, WgpuContext};
 use anyhow::{Context as _, Result};
@@ -216,6 +220,10 @@ struct WgpuResources {
     /// blur across into the other, blur back.
     backdrop_blur_a_view: Option<wgpu::TextureView>,
     backdrop_blur_b_view: Option<wgpu::TextureView>,
+    /// The same ping-pong at full resolution, for blurs too small to survive
+    /// the reduced path's downsample.
+    backdrop_full_a_view: Option<wgpu::TextureView>,
+    backdrop_full_b_view: Option<wgpu::TextureView>,
     backdrop_sampler: Option<wgpu::Sampler>,
 }
 
@@ -231,6 +239,8 @@ impl WgpuResources {
         self.backdrop_scratch_view = None;
         self.backdrop_blur_a_view = None;
         self.backdrop_blur_b_view = None;
+        self.backdrop_full_a_view = None;
+        self.backdrop_full_b_view = None;
     }
 }
 
@@ -615,6 +625,8 @@ impl WgpuRenderer {
             backdrop_scratch_view: None,
             backdrop_blur_a_view: None,
             backdrop_blur_b_view: None,
+            backdrop_full_a_view: None,
+            backdrop_full_b_view: None,
             backdrop_sampler: None,
         };
 
@@ -1270,6 +1282,30 @@ impl WgpuRenderer {
         };
         resources.backdrop_blur_a_view = Some(reduced_view("backdrop_blur_a"));
         resources.backdrop_blur_b_view = Some(reduced_view("backdrop_blur_b"));
+
+        let full = wgpu::Extent3d {
+            width,
+            height,
+            depth_or_array_layers: 1,
+        };
+        let full_view = |label| {
+            resources
+                .device
+                .create_texture(&wgpu::TextureDescriptor {
+                    label: Some(label),
+                    size: full,
+                    mip_level_count: 1,
+                    sample_count: 1,
+                    dimension: wgpu::TextureDimension::D2,
+                    format,
+                    usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+                        | wgpu::TextureUsages::TEXTURE_BINDING,
+                    view_formats: &[],
+                })
+                .create_view(&wgpu::TextureViewDescriptor::default())
+        };
+        resources.backdrop_full_a_view = Some(full_view("backdrop_full_a"));
+        resources.backdrop_full_b_view = Some(full_view("backdrop_full_b"));
         if resources.backdrop_sampler.is_none() {
             resources.backdrop_sampler =
                 Some(resources.device.create_sampler(&wgpu::SamplerDescriptor {
@@ -1318,25 +1354,37 @@ impl WgpuRenderer {
             })
     }
 
-    /// Downsample the snapshot, then blur it across and back. Leaves the result
-    /// in `backdrop_blur_a`.
+    /// The ping-pong this sigma blurs through, and where its result lands. The
+    /// shader picks the same pair off the same field; these must agree.
+    fn backdrop_pair(&self, blur_radius: f32) -> Option<(wgpu::TextureView, wgpu::TextureView)> {
+        let resources = self.resources();
+        let (a, b) = if blur_radius <= BACKDROP_SMALL_SIGMA {
+            (&resources.backdrop_full_a_view, &resources.backdrop_full_b_view)
+        } else {
+            (&resources.backdrop_blur_a_view, &resources.backdrop_blur_b_view)
+        };
+        Some((a.as_ref()?.clone(), b.as_ref()?.clone()))
+    }
+
+    /// Prefilter the snapshot, then blur it across and back. Leaves the result
+    /// in the pair's first texture.
     fn blur_backdrop(
         &self,
         encoder: &mut wgpu::CommandEncoder,
         binding: &InstanceBinding,
         blur_index: usize,
+        blur_radius: f32,
     ) {
+        let pair = self.backdrop_pair(blur_radius);
         let resources = self.resources();
-        let (Some(scratch), Some(a), Some(b)) = (
-            resources.backdrop_scratch_view.as_ref(),
-            resources.backdrop_blur_a_view.as_ref(),
-            resources.backdrop_blur_b_view.as_ref(),
-        ) else {
+        let (Some(scratch), Some((a, b))) =
+            (resources.backdrop_scratch_view.as_ref(), pair.as_ref())
+        else {
             return;
         };
         let first = binding.first_instance + blur_index as u32;
         for (label, pipeline, source, target) in [
-            ("backdrop_downsample", &resources.pipelines.backdrop_downsample, scratch, a),
+            ("backdrop_prefilter", &resources.pipelines.backdrop_downsample, scratch, a),
             ("backdrop_gauss_h", &resources.pipelines.backdrop_gauss_h, a, b),
             ("backdrop_gauss_v", &resources.pipelines.backdrop_gauss_v, b, a),
         ] {
@@ -1776,14 +1824,15 @@ impl WgpuRenderer {
                     .is_some_and(|(_, blur)| blur.order <= scene.batch_first_order(&batch))
                 {
                     let (blur_index, blur) = pending_blurs.next().unwrap();
-                    let frosted = blur.blur_radius.0 > 0.;
+                    let blur_radius = blur.blur_radius.0;
                     drop(pass);
                     self.snapshot_backdrop(&mut encoder);
-                    if frosted {
+                    if blur_radius > 0. {
                         self.blur_backdrop(
                             &mut encoder,
                             &instance_bindings.backdrop_blurs,
                             blur_index,
+                            blur_radius,
                         );
                     }
                     pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -1803,7 +1852,7 @@ impl WgpuRenderer {
                     self.draw_backdrop_blur(
                         &instance_bindings.backdrop_blurs,
                         blur_index,
-                        frosted,
+                        blur_radius,
                         &mut pass,
                     );
                 }
@@ -1899,14 +1948,15 @@ impl WgpuRenderer {
 
         // The offscreen target back onto the surface, once.
         if let Some(surface_view) = blit_to {
-            self.snapshot_backdrop(&mut encoder);
-            let scratch = self
+            // No snapshot here: the main pass has ended, so the target is no
+            // longer an attachment and can be sampled where it stands.
+            let target = self
                 .resources()
-                .backdrop_scratch_view
+                .backdrop_target_view
                 .as_ref()
-                .expect("snapshot taken above")
+                .expect("rendered offscreen")
                 .clone();
-            let backdrop = self.backdrop_bind_group(&scratch, &scratch);
+            let backdrop = self.backdrop_bind_group(&target, &target);
             let resources = self.resources();
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("backdrop_blit_pass"),
@@ -1963,19 +2013,24 @@ impl WgpuRenderer {
         &self,
         binding: &InstanceBinding,
         blur_index: usize,
-        frosted: bool,
+        blur_radius: f32,
         pass: &mut wgpu::RenderPass<'_>,
     ) {
-        let scratch = self.resources().backdrop_scratch_view.as_ref().unwrap();
+        let blurred = self.backdrop_pair(blur_radius).map(|(a, _)| a);
+        let scratch = self
+            .resources()
+            .backdrop_scratch_view
+            .as_ref()
+            .unwrap()
+            .clone();
         // Liquid glass asks for no frost, and the lens mixes the blurred slot
         // away at the rim anyway — so with `blur_radius` 0 the sharp snapshot
         // stands in for it and the gaussian never runs.
-        let blurred = if frosted {
-            self.resources().backdrop_blur_a_view.as_ref().unwrap()
-        } else {
-            scratch
+        let blurred = match blurred {
+            Some(view) if blur_radius > 0. => view,
+            _ => scratch.clone(),
         };
-        let backdrop = self.backdrop_bind_group(blurred, scratch);
+        let backdrop = self.backdrop_bind_group(&blurred, &scratch);
         let resources = self.resources();
         pass.set_pipeline(&resources.pipelines.backdrop_blurs);
         pass.set_bind_group(0, &resources.globals_bind_group, &[]);

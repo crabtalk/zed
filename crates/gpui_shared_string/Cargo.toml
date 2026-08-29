@@ -1,6 +1,6 @@
 [package]
 name = "bezel-gpui-shared-string"
-version = "0.3.1+zed.d9ad6a"
+version = "0.3.2+zed.d9ad6a"
 description = "gpui_shared_string from zed-industries/zed, republished for the bezel gpui fork"
 license = "Apache-2.0"
 readme = "README.md"

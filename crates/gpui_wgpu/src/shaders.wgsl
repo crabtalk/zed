@@ -1382,10 +1382,19 @@ struct BackdropBlur {
     magnify: f32,
     dispersion: f32,
     gain: f32,
+    saturation: f32,
     tint: Hsla,
     edge: f32,
     edge_width: f32,
     edge_aa: f32,
+    pad: u32, // align to 8 bytes
+}
+
+// The backdrop's chroma about its own grey. A gain alone moves level and
+// colour together; this is what lets a surface go dark and stay coloured.
+fn saturated(color: vec3<f32>, amount: f32) -> vec3<f32> {
+    let luma = dot(color, vec3<f32>(0.2126, 0.7152, 0.0722));
+    return vec3<f32>(luma) + (color - vec3<f32>(luma)) * amount;
 }
 
 struct BackdropBlurVarying {
@@ -1426,11 +1435,13 @@ fn fs_backdrop_blur(input: BackdropBlurVarying) -> @location(0) vec4<f32> {
     let viewport = globals.viewport_size;
     let point = input.position.xy;
     let tint = hsla_to_rgba(blur.tint);
-    // The transfer is `out = gain * backdrop + tint`; both arrive with the
-    // primitive. Keep in step with shaders.metal.
+    // The transfer is `out = gain * saturated(backdrop) + tint`; every term
+    // arrives with the primitive. Keep in step with shaders.metal.
     var gain = 1.0;
+    var saturation = 1.0;
     if (tint.a > 0.0) {
         gain = blur.gain;
+        saturation = blur.saturation;
     }
 
     let bevel = blur.lens;
@@ -1440,7 +1451,7 @@ fn fs_backdrop_blur(input: BackdropBlurVarying) -> @location(0) vec4<f32> {
     }
     if (depth >= 1.0) {
         let flat_color = textureSampleLevel(t_backdrop, s_backdrop, point / viewport, 0.0);
-        let lit = flat_color.rgb * gain + tint.rgb * tint.a;
+        let lit = saturated(flat_color.rgb, saturation) * gain + tint.rgb * tint.a;
         let behind = textureSampleLevel(t_backdrop_sharp, s_backdrop, point / viewport, 0.0).rgb;
         return vec4<f32>(mix(behind, lit, coverage), flat_color.a);
     }
@@ -1495,7 +1506,7 @@ fn fs_backdrop_blur(input: BackdropBlurVarying) -> @location(0) vec4<f32> {
         textureSampleLevel(t_backdrop, s_backdrop, uv_b, 0.0).b,
     );
 
-    var color = lensed * gain + tint.rgb * tint.a;
+    var color = saturated(lensed, saturation) * gain + tint.rgb * tint.a;
     // The lit rim, even the whole way round.
     color = color + (1.0 - smoothstep(0.0, blur.edge_width, -distance)) * blur.edge;
     let behind = textureSampleLevel(t_backdrop_sharp, s_backdrop, point / viewport, 0.0).rgb;

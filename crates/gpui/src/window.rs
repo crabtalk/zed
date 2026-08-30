@@ -1391,8 +1391,11 @@ pub struct GlassEffect {
     pub magnify: f32,
     /// Per-channel spread of the displacement — the chromatic fringe.
     pub dispersion: f32,
-    /// Slope of `out = gain * backdrop + tint`.
+    /// Slope of `out = gain * saturated(backdrop) + tint`.
     pub gain: f32,
+    /// How far the backdrop's chroma is pushed from its own grey, before the
+    /// gain drops the level. 1 passes it through.
+    pub saturation: f32,
     /// Its offset, added.
     pub tint: Hsla,
     /// How much white the lit rim adds, 0..1.
@@ -4318,10 +4321,12 @@ impl Window {
             magnify: glass.magnify,
             dispersion: glass.dispersion,
             gain: glass.gain,
+            saturation: glass.saturation,
             tint: glass.tint,
             edge: glass.edge,
             edge_width: glass.edge_width.scale(scale_factor),
             edge_aa: glass.edge_aa.scale(scale_factor),
+            pad: 0,
         });
     }
 

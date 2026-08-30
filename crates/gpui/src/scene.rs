@@ -635,8 +635,12 @@ pub struct BackdropBlur {
     pub magnify: f32,
     /// Per-channel spread of the displacement — the chromatic fringe.
     pub dispersion: f32,
-    /// Slope of `out = gain * backdrop + tint`.
+    /// Slope of `out = gain * saturated(backdrop) + tint`.
     pub gain: f32,
+    /// How far the backdrop's chroma is pushed from its own grey, before the
+    /// gain drops the level. 1 passes it through; above 1 a surface can go
+    /// dark without its colours going with it.
+    pub saturation: f32,
     /// Its offset. Transparent leaves the blur bare.
     pub tint: Hsla,
     /// How much white the lit rim adds, 0..1.
@@ -645,6 +649,7 @@ pub struct BackdropBlur {
     pub edge_width: ScaledPixels,
     /// Width of the coverage ramp at the boundary. Zero is a hard edge.
     pub edge_aa: ScaledPixels,
+    pub pad: u32, // align to 8 bytes
 }
 
 #[derive(Debug, Copy, Clone)]

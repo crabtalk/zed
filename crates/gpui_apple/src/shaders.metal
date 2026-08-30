@@ -1289,6 +1289,13 @@ struct BackdropBlurFragmentInput {
   uint blur_id [[flat]];
 };
 
+// The backdrop's chroma about its own grey. A gain alone moves level and
+// colour together; this is what lets a surface go dark and stay coloured.
+float3 saturated(float3 color, float amount) {
+  float luma = dot(color, float3(0.2126, 0.7152, 0.0722));
+  return luma + (color - luma) * amount;
+}
+
 vertex BackdropBlurVertexOutput backdrop_blur_vertex(
     uint unit_vertex_id [[vertex_id]], uint blur_id [[instance_id]],
     constant float2 *unit_vertices [[buffer(BackdropBlurInputIndex_Vertices)]],
@@ -1340,16 +1347,19 @@ fragment float4 backdrop_blur_fragment(
   // `distance` is negative inside, so this is 1 at the rim falling to 0 at
   // `refraction` px inward — and exactly 0 everywhere when refraction is off.
   float4 tint = hsla_to_rgba(blur.tint);
-  // The transfer is `out = gain * backdrop + tint`; both terms arrive with the
-  // primitive. A plain material, whose tint is transparent, is left alone.
+  // The transfer is `out = gain * saturated(backdrop) + tint`; every term
+  // arrives with the primitive. A plain material, whose tint is transparent,
+  // is left alone.
   float gain = tint.a > 0. ? blur.gain : 1.;
+  float saturation = tint.a > 0. ? blur.saturation : 1.;
   float bevel = blur.lens;
   // How deep into the glass this fragment is, across the bevel: 0 at the rim,
   // 1 once the surface has flattened out.
   float depth = bevel > 0. ? saturate(-distance / bevel) : 1.;
   if (depth >= 1.) {
     float4 flat_color = source_texture.sample(source_sampler, point / viewport);
-    flat_color.rgb = flat_color.rgb * gain + tint.rgb * tint.a;
+    flat_color.rgb =
+        saturated(flat_color.rgb, saturation) * gain + tint.rgb * tint.a;
     flat_color.rgb = mix(sharp_texture.sample(source_sampler, point / viewport).rgb,
                          flat_color.rgb, coverage);
     return flat_color;
@@ -1393,7 +1403,7 @@ fragment float4 backdrop_blur_fragment(
   }
   float4 color = float4(lensed, 1.);
 
-  color.rgb = color.rgb * gain + tint.rgb * tint.a;
+  color.rgb = saturated(color.rgb, saturation) * gain + tint.rgb * tint.a;
 
   // The lit rim, even the whole way round.
   color.rgb += (1. - smoothstep(0., blur.edge_width, -distance)) * blur.edge;

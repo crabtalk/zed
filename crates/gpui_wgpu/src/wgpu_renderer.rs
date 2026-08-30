@@ -2707,7 +2707,9 @@ impl RenderingParameters {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use gpui::{MonochromeSprite, PolychromeSprite, Quad, Shadow, SubpixelSprite, Underline};
+    use gpui::{
+        BackdropBlur, MonochromeSprite, PolychromeSprite, Quad, Shadow, SubpixelSprite, Underline,
+    };
 
     #[test]
     fn webgl_shader_is_valid_wgsl_without_storage_buffers() {
@@ -2745,5 +2747,6 @@ mod tests {
         assert_eq!(std::mem::size_of::<MonochromeSprite>(), 28 * 4);
         assert_eq!(std::mem::size_of::<SubpixelSprite>(), 28 * 4);
         assert_eq!(std::mem::size_of::<PolychromeSprite>(), 24 * 4);
+        assert_eq!(std::mem::size_of::<BackdropBlur>(), 26 * 4);
     }
 }

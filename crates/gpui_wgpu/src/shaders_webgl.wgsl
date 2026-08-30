@@ -220,10 +220,10 @@ fn load_poly_sprite(instance_id: u32) -> PolychromeSprite {
     );
 }
 
-// 22 words: order, blur_radius, bounds(4), content_mask(4), corner_radii(4),
-// lens, magnify, dispersion, tint(4), hairline.
+// 26 words: order, blur_radius, bounds(4), content_mask(4), corner_radii(4),
+// lens, reach, magnify, dispersion, gain, tint(4), edge, edge_width, edge_aa.
 fn load_backdrop_blur(instance_id: u32) -> BackdropBlur {
-    var cursor = instance_cursor(instance_id * 22u);
+    var cursor = instance_cursor(instance_id * 26u);
     return BackdropBlur(
         read_word(&cursor),
         read_f32(&cursor),
@@ -233,7 +233,11 @@ fn load_backdrop_blur(instance_id: u32) -> BackdropBlur {
         read_f32(&cursor),
         read_f32(&cursor),
         read_f32(&cursor),
+        read_f32(&cursor),
+        read_f32(&cursor),
         read_hsla(&cursor),
+        read_f32(&cursor),
+        read_f32(&cursor),
         read_f32(&cursor),
     );
 }

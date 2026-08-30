@@ -627,16 +627,24 @@ pub struct BackdropBlur {
     pub corner_radii: Corners<ScaledPixels>,
     /// How deep the lens profile reaches in from the rim; 0 paints a flat frost.
     pub lens: ScaledPixels,
+    /// The furthest that profile may drag the backdrop.
+    pub reach: ScaledPixels,
     /// Displacement amplitude. Signed: positive samples toward the centre, so
     /// the interior magnifies and what it displaces compresses at the rim;
     /// negative inverts that.
     pub magnify: f32,
     /// Per-channel spread of the displacement — the chromatic fringe.
     pub dispersion: f32,
-    /// Tint composited over the blur. Transparent leaves the blur bare.
+    /// Slope of `out = gain * backdrop + tint`.
+    pub gain: f32,
+    /// Its offset. Transparent leaves the blur bare.
     pub tint: Hsla,
-    /// Width of the lit edge. One logical pixel, in device pixels.
-    pub hairline: ScaledPixels,
+    /// How much white the lit rim adds, 0..1.
+    pub edge: f32,
+    /// How far in that light falls off to nothing.
+    pub edge_width: ScaledPixels,
+    /// Width of the coverage ramp at the boundary. Zero is a hard edge.
+    pub edge_aa: ScaledPixels,
 }
 
 #[derive(Debug, Copy, Clone)]

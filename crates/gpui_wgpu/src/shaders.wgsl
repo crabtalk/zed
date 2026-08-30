@@ -1378,10 +1378,14 @@ struct BackdropBlur {
     content_mask: Bounds,
     corner_radii: Corners,
     lens: f32,
+    reach: f32,
     magnify: f32,
     dispersion: f32,
+    gain: f32,
     tint: Hsla,
-    hairline: f32,
+    edge: f32,
+    edge_width: f32,
+    edge_aa: f32,
 }
 
 struct BackdropBlurVarying {
@@ -1412,18 +1416,21 @@ fn fs_backdrop_blur(input: BackdropBlurVarying) -> @location(0) vec4<f32> {
 
     let blur = load_backdrop_blur(input.blur_id);
     let distance = quad_sdf(input.position.xy, blur.bounds, blur.corner_radii);
-    if (distance > 0.0) {
+    // How much of this pixel the shape covers; the boundary is mixed against
+    // the untouched backdrop below, since this pass replaces rather than blends.
+    let coverage = clamp(0.5 - distance / max(blur.edge_aa, 1e-3), 0.0, 1.0);
+    if (coverage <= 0.0) {
         discard;
     }
 
     let viewport = globals.viewport_size;
     let point = input.position.xy;
     let tint = hsla_to_rgba(blur.tint);
-    // Measured off NSGlassEffectView across five backdrop levels (2026-08):
-    // interior = 1.042 * backdrop + 19/255.
+    // The transfer is `out = gain * backdrop + tint`; both arrive with the
+    // primitive. Keep in step with shaders.metal.
     var gain = 1.0;
     if (tint.a > 0.0) {
-        gain = 1.042;
+        gain = blur.gain;
     }
 
     let bevel = blur.lens;
@@ -1433,7 +1440,9 @@ fn fs_backdrop_blur(input: BackdropBlurVarying) -> @location(0) vec4<f32> {
     }
     if (depth >= 1.0) {
         let flat_color = textureSampleLevel(t_backdrop, s_backdrop, point / viewport, 0.0);
-        return vec4<f32>(flat_color.rgb * gain + tint.rgb * tint.a, flat_color.a);
+        let lit = flat_color.rgb * gain + tint.rgb * tint.a;
+        let behind = textureSampleLevel(t_backdrop_sharp, s_backdrop, point / viewport, 0.0).rgb;
+        return vec4<f32>(mix(behind, lit, coverage), flat_color.a);
     }
 
     // Outward normal of the rounded rect: the SDF's gradient by central
@@ -1457,7 +1466,7 @@ fn fs_backdrop_blur(input: BackdropBlurVarying) -> @location(0) vec4<f32> {
     var step_v = -outward * slope * bevel * blur.magnify;
     // A 460x120 capsule over a 12pt ruler displaces at most ~12pt against a
     // 27pt bevel, so the rim reaches a little under half its own depth.
-    let limit = bevel * 0.45;
+    let limit = blur.reach;
     let reach = length(step_v);
     if (reach > limit) {
         step_v = step_v * (limit / reach);
@@ -1465,26 +1474,32 @@ fn fs_backdrop_blur(input: BackdropBlurVarying) -> @location(0) vec4<f32> {
 
     // Frost in the middle, a sharp bent image at the rim — the interior is what
     // rows are read against, the edge is what makes it look like glass.
-    let sharpness = (1.0 - depth) * (1.0 - depth);
+    //
+    // Blur is UNIFORM across the surface — no ramp. Measured 2026-08-30, macOS
+    // 26.3, a real NSGlassEffectView over 48pt bands at a 460x120 capsule:
+    //
+    //   style 1 "clear"  : sigma fits at ~0 (0.8pt), band pitch held at 96px
+    //                      exactly. A pass-through, with the lens only at the rim.
+    //   style 0 "regular": sigma fits at 3.5pt, rms 6/255. Its flatness is the
+    //                      gain (0.139), not the blur.
+    //
+    // An earlier ramp faded frost off toward the rim, leaving the edge sharper
+    // than the middle. Neither variant does that, and the sharp snapshot is no
+    // longer sampled at all.
     let uv_r = (point + step_v * (1.0 - blur.dispersion)) / viewport;
     let uv_g = (point + step_v) / viewport;
     let uv_b = (point + step_v * (1.0 + blur.dispersion)) / viewport;
     let lensed = vec3<f32>(
-        mix(textureSampleLevel(t_backdrop, s_backdrop, uv_r, 0.0).r,
-            textureSampleLevel(t_backdrop_sharp, s_backdrop, uv_r, 0.0).r, sharpness),
-        mix(textureSampleLevel(t_backdrop, s_backdrop, uv_g, 0.0).g,
-            textureSampleLevel(t_backdrop_sharp, s_backdrop, uv_g, 0.0).g, sharpness),
-        mix(textureSampleLevel(t_backdrop, s_backdrop, uv_b, 0.0).b,
-            textureSampleLevel(t_backdrop_sharp, s_backdrop, uv_b, 0.0).b, sharpness),
+        textureSampleLevel(t_backdrop, s_backdrop, uv_r, 0.0).r,
+        textureSampleLevel(t_backdrop, s_backdrop, uv_g, 0.0).g,
+        textureSampleLevel(t_backdrop, s_backdrop, uv_b, 0.0).b,
     );
 
     var color = lensed * gain + tint.rgb * tint.a;
-    // The lit edge is a hairline, not a bevel gradient: one pixel wide at every
-    // size and over every backdrop, dimmer where it faces up.
-    let hair = 1.0 - smoothstep(0.0, blur.hairline * 1.5, -distance);
-    let facing_up = clamp(-outward.y, 0.0, 1.0);
-    color = color + hair * (1.0 - 0.18 * facing_up) * 0.18;
-    return vec4<f32>(color, 1.0);
+    // The lit rim, even the whole way round.
+    color = color + (1.0 - smoothstep(0.0, blur.edge_width, -distance)) * blur.edge;
+    let behind = textureSampleLevel(t_backdrop_sharp, s_backdrop, point / viewport, 0.0).rgb;
+    return vec4<f32>(mix(behind, color, coverage), 1.0);
 }
 
 // The offscreen target copied back to the surface, once, at end of frame. Only

@@ -1384,12 +1384,23 @@ pub struct GlassEffect {
     pub blur_radius: Pixels,
     /// How deep the lens profile reaches in from the rim. Zero paints flat.
     pub lens: Pixels,
+    /// The furthest the rim may drag the backdrop. The dome's tilt runs to
+    /// vertical at the rim, so the displacement needs a bound of its own.
+    pub reach: Pixels,
     /// Displacement amplitude; signed, so its sign picks the direction.
     pub magnify: f32,
     /// Per-channel spread of the displacement — the chromatic fringe.
     pub dispersion: f32,
-    /// Composited over the blur, additively.
+    /// Slope of `out = gain * backdrop + tint`.
+    pub gain: f32,
+    /// Its offset, added.
     pub tint: Hsla,
+    /// How much white the lit rim adds, 0..1.
+    pub edge: f32,
+    /// How far in that light falls off to nothing.
+    pub edge_width: Pixels,
+    /// Width of the coverage ramp at the shape's boundary. Zero is a hard edge.
+    pub edge_aa: Pixels,
 }
 
 impl Window {
@@ -4303,10 +4314,14 @@ impl Window {
             content_mask,
             corner_radii: corner_radii.scale(scale_factor),
             lens: glass.lens.scale(scale_factor),
+            reach: glass.reach.scale(scale_factor),
             magnify: glass.magnify,
             dispersion: glass.dispersion,
+            gain: glass.gain,
             tint: glass.tint,
-            hairline: px(1.).scale(scale_factor),
+            edge: glass.edge,
+            edge_width: glass.edge_width.scale(scale_factor),
+            edge_aa: glass.edge_aa.scale(scale_factor),
         });
     }
 

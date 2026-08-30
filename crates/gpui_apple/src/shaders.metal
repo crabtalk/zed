@@ -1323,7 +1323,11 @@ fragment float4 backdrop_blur_fragment(
   // Rounded-rect clip: blending is disabled on this pipeline (the blur
   // REPLACES the region), so fragments outside must discard, not return 0.
   float distance = quad_sdf(input.position.xy, blur.bounds, blur.corner_radii);
-  if (distance > 0.) {
+  // How much of this pixel the shape covers, over a ramp the theme states.
+  // The pass does not blend — it replaces the region — so the boundary is
+  // mixed against the untouched backdrop below rather than by the blender.
+  float coverage = saturate(0.5 - distance / max(blur.edge_aa, 1e-3));
+  if (coverage <= 0.) {
     discard_fragment();
   }
 
@@ -1336,10 +1340,9 @@ fragment float4 backdrop_blur_fragment(
   // `distance` is negative inside, so this is 1 at the rim falling to 0 at
   // `refraction` px inward — and exactly 0 everywhere when refraction is off.
   float4 tint = hsla_to_rgba(blur.tint);
-  // Measured off NSGlassEffectView across five backdrop levels (2026-08):
-  // interior = 1.042 * backdrop + 19/255. The material lifts what is behind
-  // it; a plain material, whose tint is transparent, leaves it alone.
-  float gain = tint.a > 0. ? 1.042 : 1.;
+  // The transfer is `out = gain * backdrop + tint`; both terms arrive with the
+  // primitive. A plain material, whose tint is transparent, is left alone.
+  float gain = tint.a > 0. ? blur.gain : 1.;
   float bevel = blur.lens;
   // How deep into the glass this fragment is, across the bevel: 0 at the rim,
   // 1 once the surface has flattened out.
@@ -1347,6 +1350,8 @@ fragment float4 backdrop_blur_fragment(
   if (depth >= 1.) {
     float4 flat_color = source_texture.sample(source_sampler, point / viewport);
     flat_color.rgb = flat_color.rgb * gain + tint.rgb * tint.a;
+    flat_color.rgb = mix(sharp_texture.sample(source_sampler, point / viewport).rgb,
+                         flat_color.rgb, coverage);
     return flat_color;
   }
 
@@ -1364,23 +1369,13 @@ fragment float4 backdrop_blur_fragment(
   float2 outward =
       gradient_length > 0. ? gradient / gradient_length : float2(0.);
 
-  // A lens over the whole shape, not a bezel on its edge: the surface is a
-  // dome whose slope grows from flat at the centre-line to vertical at the
-  // rim. A bezel profile puts all its slope in the outermost pixels and leaves
-  // the body a straight pass-through, so no contour ever forms.
+  // The surface is a dome: flat along the centre-line, tilting to vertical at
+  // the rim. The epsilon keeps that divergence finite.
   float rise = 1. - depth;
-  // tan of the dome's tilt: flat at the centre-line, vertical at the rim. The
-  // epsilon is what keeps that divergence finite; how far the rim may reach is
-  // bounded below, by the lens depth, rather than by a cap on the tilt.
   float slope = rise / sqrt(max(1. - rise * rise, 1e-4));
 
-  // Amplitude is given, not derived from a refractive index: the effect is
-  // designed rather than physical, and its sign is which way the lens bends.
   float2 step = -outward * slope * bevel * blur.magnify;
-  // Measured off SwiftUI's `.glassEffect(.clear)` (2026-08): a 460x120 capsule
-  // over a 12pt ruler displaces at most ~12pt against a 27pt bezel, so the rim
-  // reaches a little under half its own depth and no further.
-  float limit = bevel * 0.45;
+  float limit = blur.reach;
   float reach = length(step);
   if (reach > limit) {
     step *= limit / reach;
@@ -1390,24 +1385,19 @@ fragment float4 backdrop_blur_fragment(
     offsets[channel] = step * (1. + float(channel - 1) * blur.dispersion);
   }
 
-  // Frost in the middle, a sharp bent image at the rim — the interior is what
-  // rows are read against, the edge is what makes it look like glass.
-  float sharpness = (1. - depth) * (1. - depth);
+  // One blur across the whole surface, sampled through the lens.
   float3 lensed;
   for (int channel = 0; channel < 3; channel++) {
     float2 uv = (point + offsets[channel]) / viewport;
-    float4 frosted = source_texture.sample(source_sampler, uv);
-    float4 crisp = sharp_texture.sample(source_sampler, uv);
-    lensed[channel] = mix(frosted[channel], crisp[channel], sharpness);
+    lensed[channel] = source_texture.sample(source_sampler, uv)[channel];
   }
   float4 color = float4(lensed, 1.);
 
   color.rgb = color.rgb * gain + tint.rgb * tint.a;
 
-  // The lit edge is a hairline, not a bevel gradient: one pixel wide at every
-  // size and over every backdrop, dimmer where it faces up.
-  float hair = 1. - smoothstep(0., blur.hairline * 1.5, -distance);
-  float facing_up = saturate(-outward.y);
-  color.rgb += hair * (1. - 0.18 * facing_up) * 0.18;
+  // The lit rim, even the whole way round.
+  color.rgb += (1. - smoothstep(0., blur.edge_width, -distance)) * blur.edge;
+  color.rgb = mix(sharp_texture.sample(source_sampler, point / viewport).rgb,
+                  color.rgb, coverage);
   return color;
 }

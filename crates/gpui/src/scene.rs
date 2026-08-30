@@ -649,7 +649,10 @@ pub struct BackdropBlur {
     pub edge_width: ScaledPixels,
     /// Width of the coverage ramp at the boundary. Zero is a hard edge.
     pub edge_aa: ScaledPixels,
-    pub pad: u32, // align to 8 bytes
+    /// The element tree's opacity here. The pass replaces its region rather
+    /// than blending, so a fading material has to mix itself back toward the
+    /// untouched backdrop; this rides the coverage that already does it.
+    pub opacity: f32,
 }
 
 #[derive(Debug, Copy, Clone)]

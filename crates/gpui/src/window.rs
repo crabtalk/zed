@@ -4326,7 +4326,9 @@ impl Window {
             edge: glass.edge,
             edge_width: glass.edge_width.scale(scale_factor),
             edge_aa: glass.edge_aa.scale(scale_factor),
-            pad: 0,
+            // Read here rather than taken from the caller: a material inside a
+            // fading tree is faded by the tree, like every other primitive.
+            opacity: self.element_opacity_for_bounds(&bounds),
         });
     }
 

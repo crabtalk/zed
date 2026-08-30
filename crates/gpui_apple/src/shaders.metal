@@ -1333,7 +1333,8 @@ fragment float4 backdrop_blur_fragment(
   // How much of this pixel the shape covers, over a ramp the theme states.
   // The pass does not blend — it replaces the region — so the boundary is
   // mixed against the untouched backdrop below rather than by the blender.
-  float coverage = saturate(0.5 - distance / max(blur.edge_aa, 1e-3));
+  float coverage =
+      saturate(0.5 - distance / max(blur.edge_aa, 1e-3)) * blur.opacity;
   if (coverage <= 0.) {
     discard_fragment();
   }

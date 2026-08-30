@@ -1387,7 +1387,7 @@ struct BackdropBlur {
     edge: f32,
     edge_width: f32,
     edge_aa: f32,
-    pad: u32, // align to 8 bytes
+    opacity: f32,
 }
 
 // The backdrop's chroma about its own grey. A gain alone moves level and
@@ -1427,7 +1427,7 @@ fn fs_backdrop_blur(input: BackdropBlurVarying) -> @location(0) vec4<f32> {
     let distance = quad_sdf(input.position.xy, blur.bounds, blur.corner_radii);
     // How much of this pixel the shape covers; the boundary is mixed against
     // the untouched backdrop below, since this pass replaces rather than blends.
-    let coverage = clamp(0.5 - distance / max(blur.edge_aa, 1e-3), 0.0, 1.0);
+    let coverage = clamp(0.5 - distance / max(blur.edge_aa, 1e-3), 0.0, 1.0) * blur.opacity;
     if (coverage <= 0.0) {
         discard;
     }

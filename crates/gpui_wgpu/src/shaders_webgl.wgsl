@@ -222,7 +222,7 @@ fn load_poly_sprite(instance_id: u32) -> PolychromeSprite {
 
 // 28 words: order, blur_radius, bounds(4), content_mask(4), corner_radii(4),
 // lens, reach, magnify, dispersion, gain, saturation, tint(4), edge,
-// edge_width, edge_aa, pad.
+// edge_width, edge_aa, opacity.
 fn load_backdrop_blur(instance_id: u32) -> BackdropBlur {
     var cursor = instance_cursor(instance_id * 28u);
     return BackdropBlur(
@@ -241,6 +241,6 @@ fn load_backdrop_blur(instance_id: u32) -> BackdropBlur {
         read_f32(&cursor),
         read_f32(&cursor),
         read_f32(&cursor),
-        read_word(&cursor),
+        read_f32(&cursor),
     );
 }

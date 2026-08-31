@@ -4200,6 +4200,33 @@ impl Window {
         corner_radii: Corners<Pixels>,
         shadows: &[BoxShadow],
     ) {
+        self.drop_shadows(bounds, corner_radii, shadows, false);
+    }
+
+    /// The same, with the element's own shape cut out of it.
+    ///
+    /// A plain drop shadow paints under its element as well as around it, which
+    /// nothing notices while an opaque fill covers the middle. A surface whose
+    /// fill arrives in a later pass — liquid glass — has no such cover, and the
+    /// shadow reads as a slab across it.
+    ///
+    /// This method should only be called as part of the paint phase of element drawing.
+    pub fn paint_drop_shadows_outside(
+        &mut self,
+        bounds: Bounds<Pixels>,
+        corner_radii: Corners<Pixels>,
+        shadows: &[BoxShadow],
+    ) {
+        self.drop_shadows(bounds, corner_radii, shadows, true);
+    }
+
+    fn drop_shadows(
+        &mut self,
+        bounds: Bounds<Pixels>,
+        corner_radii: Corners<Pixels>,
+        shadows: &[BoxShadow],
+        outside: bool,
+    ) {
         self.invalidator.debug_assert_paint();
 
         let scale_factor = self.scale_factor();
@@ -4221,7 +4248,7 @@ impl Window {
                 color: shadow.color.opacity(opacity),
                 element_bounds,
                 element_corner_radii,
-                inset: 0,
+                inset: if outside { 2 } else { 0 },
                 pad: 0,
             });
         }

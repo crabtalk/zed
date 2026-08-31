@@ -667,7 +667,11 @@ pub struct Shadow {
     pub color: Hsla,
     pub element_bounds: Bounds<ScaledPixels>,
     pub element_corner_radii: Corners<ScaledPixels>,
-    /// 0 = drop shadow (rendered outside the element), 1 = inset shadow (rendered inside).
+    /// 0 = drop shadow, 1 = inset shadow (rendered inside the element), 2 = a
+    /// drop shadow clipped to outside the element. A plain drop shadow does not
+    /// cut its own element out — nothing notices while an opaque fill covers
+    /// the middle, but a surface whose fill lives in a later pass needs the
+    /// hole.
     pub inset: u32,
     pub pad: u32, // align to 8 bytes
 }

@@ -1301,6 +1301,12 @@ float3 saturated(float3 color, float amount) {
   return luma + (color - luma) * amount;
 }
 
+// The drawable is premultiplied — a quad lands as `alpha * colour` — and a
+// window that composites translucent carries alpha < 1 wherever the desktop
+// still shows. The transfer is a statement about colour, so it runs on the
+// straight value and the result is scaled back by the alpha it keeps.
+float3 unpremultiply(float4 color) { return color.rgb / max(color.a, 1e-4); }
+
 vertex BackdropBlurVertexOutput backdrop_blur_vertex(
     uint unit_vertex_id [[vertex_id]], uint blur_id [[instance_id]],
     constant float2 *unit_vertices [[buffer(BackdropBlurInputIndex_Vertices)]],
@@ -1363,12 +1369,14 @@ fragment float4 backdrop_blur_fragment(
   // 1 once the surface has flattened out.
   float depth = bevel > 0. ? saturate(-distance / bevel) : 1.;
   if (depth >= 1.) {
-    float4 flat_color = source_texture.sample(source_sampler, point / viewport);
-    flat_color.rgb =
-        saturated(flat_color.rgb, saturation) * gain + tint.rgb * tint.a;
-    flat_color.rgb = mix(sharp_texture.sample(source_sampler, point / viewport).rgb,
-                         flat_color.rgb, coverage);
-    return flat_color;
+    float2 uv = point / viewport;
+    float4 source = source_texture.sample(source_sampler, uv);
+    float4 sharp = sharp_texture.sample(source_sampler, uv);
+    float3 flat_color =
+        saturated(unpremultiply(source), saturation) * gain + tint.rgb * tint.a;
+    flat_color = mix(unpremultiply(sharp), flat_color, coverage);
+    float alpha = mix(sharp.a, source.a, coverage);
+    return float4(flat_color * alpha, alpha);
   }
 
   // Outward normal of the rounded rect: the SDF's gradient, by central
@@ -1401,19 +1409,24 @@ fragment float4 backdrop_blur_fragment(
     offsets[channel] = step * (1. + float(channel - 1) * blur.dispersion);
   }
 
-  // One blur across the whole surface, sampled through the lens.
+  // One blur across the whole surface, sampled through the lens. Each channel
+  // is straightened against the alpha it arrived with, since the three come
+  // from three positions.
   float3 lensed;
   for (int channel = 0; channel < 3; channel++) {
     float2 uv = (point + offsets[channel]) / viewport;
-    lensed[channel] = source_texture.sample(source_sampler, uv)[channel];
+    lensed[channel] = unpremultiply(source_texture.sample(source_sampler, uv))[channel];
   }
-  float4 color = float4(lensed, 1.);
-
-  color.rgb = saturated(color.rgb, saturation) * gain + tint.rgb * tint.a;
+  float3 color = saturated(lensed, saturation) * gain + tint.rgb * tint.a;
 
   // The lit rim, even the whole way round.
-  color.rgb += (1. - smoothstep(0., blur.edge_width, -distance)) * blur.edge;
-  color.rgb = mix(sharp_texture.sample(source_sampler, point / viewport).rgb,
-                  color.rgb, coverage);
-  return color;
+  color += (1. - smoothstep(0., blur.edge_width, -distance)) * blur.edge;
+
+  // The coverage the lens carries is the one it bent into place, so the band
+  // hands the window the same transparency the flat interior does.
+  float4 source = source_texture.sample(source_sampler, (point + step) / viewport);
+  float4 sharp = sharp_texture.sample(source_sampler, point / viewport);
+  color = mix(unpremultiply(sharp), color, coverage);
+  float alpha = mix(sharp.a, source.a, coverage);
+  return float4(color * alpha, alpha);
 }

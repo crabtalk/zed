@@ -1402,6 +1402,14 @@ fn saturated(color: vec3<f32>, amount: f32) -> vec3<f32> {
     return vec3<f32>(luma) + (color - vec3<f32>(luma)) * amount;
 }
 
+// The target is premultiplied — a quad lands as `alpha * colour` — and a
+// surface that composites translucent carries alpha < 1 wherever what is
+// behind it still shows. The transfer is a statement about colour, so it runs
+// on the straight value and the result is scaled back by the alpha it keeps.
+fn unpremultiply(color: vec4<f32>) -> vec3<f32> {
+    return color.rgb / max(color.a, 1e-4);
+}
+
 struct BackdropBlurVarying {
     @builtin(position) position: vec4<f32>,
     @location(0) @interpolate(flat) blur_id: u32,
@@ -1455,10 +1463,13 @@ fn fs_backdrop_blur(input: BackdropBlurVarying) -> @location(0) vec4<f32> {
         depth = clamp(-distance / bevel, 0.0, 1.0);
     }
     if (depth >= 1.0) {
-        let flat_color = textureSampleLevel(t_backdrop, s_backdrop, point / viewport, 0.0);
-        let lit = saturated(flat_color.rgb, saturation) * gain + tint.rgb * tint.a;
-        let behind = textureSampleLevel(t_backdrop_sharp, s_backdrop, point / viewport, 0.0).rgb;
-        return vec4<f32>(mix(behind, lit, coverage), flat_color.a);
+        let uv = point / viewport;
+        let source = textureSampleLevel(t_backdrop, s_backdrop, uv, 0.0);
+        let sharp = textureSampleLevel(t_backdrop_sharp, s_backdrop, uv, 0.0);
+        let lit = saturated(unpremultiply(source), saturation) * gain + tint.rgb * tint.a;
+        let straight = mix(unpremultiply(sharp), lit, coverage);
+        let alpha = mix(sharp.a, source.a, coverage);
+        return vec4<f32>(straight * alpha, alpha);
     }
 
     // Outward normal of the rounded rect: the SDF's gradient by central
@@ -1505,17 +1516,24 @@ fn fs_backdrop_blur(input: BackdropBlurVarying) -> @location(0) vec4<f32> {
     let uv_r = (point + step_v * (1.0 - blur.dispersion)) / viewport;
     let uv_g = (point + step_v) / viewport;
     let uv_b = (point + step_v * (1.0 + blur.dispersion)) / viewport;
+    // Each channel is straightened against the alpha it arrived with, since the
+    // three come from three positions.
+    let source = textureSampleLevel(t_backdrop, s_backdrop, uv_g, 0.0);
     let lensed = vec3<f32>(
-        textureSampleLevel(t_backdrop, s_backdrop, uv_r, 0.0).r,
-        textureSampleLevel(t_backdrop, s_backdrop, uv_g, 0.0).g,
-        textureSampleLevel(t_backdrop, s_backdrop, uv_b, 0.0).b,
+        unpremultiply(textureSampleLevel(t_backdrop, s_backdrop, uv_r, 0.0)).r,
+        unpremultiply(source).g,
+        unpremultiply(textureSampleLevel(t_backdrop, s_backdrop, uv_b, 0.0)).b,
     );
 
     var color = saturated(lensed, saturation) * gain + tint.rgb * tint.a;
     // The lit rim, even the whole way round.
     color = color + (1.0 - smoothstep(0.0, blur.edge_width, -distance)) * blur.edge;
-    let behind = textureSampleLevel(t_backdrop_sharp, s_backdrop, point / viewport, 0.0).rgb;
-    return vec4<f32>(mix(behind, color, coverage), 1.0);
+    // The coverage the lens carries is the one it bent into place, so the band
+    // hands the compositor the same transparency the flat interior does.
+    let sharp = textureSampleLevel(t_backdrop_sharp, s_backdrop, point / viewport, 0.0);
+    let straight = mix(unpremultiply(sharp), color, coverage);
+    let alpha = mix(sharp.a, source.a, coverage);
+    return vec4<f32>(straight * alpha, alpha);
 }
 
 // The offscreen target copied back to the surface, once, at end of frame. Only

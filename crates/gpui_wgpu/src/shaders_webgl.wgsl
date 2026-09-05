@@ -74,6 +74,10 @@ fn read_bounds(cursor: ptr<function, InstanceCursor>) -> Bounds {
     return Bounds(read_vec2_f32(cursor), read_vec2_f32(cursor));
 }
 
+fn read_content_mask(cursor: ptr<function, InstanceCursor>) -> ContentMask {
+    return ContentMask(read_bounds(cursor), read_corners(cursor));
+}
+
 fn read_corners(cursor: ptr<function, InstanceCursor>) -> Corners {
     return Corners(
         read_f32(cursor),
@@ -136,12 +140,12 @@ fn read_transformation(cursor: ptr<function, InstanceCursor>) -> TransformationM
 }
 
 fn load_quad(instance_id: u32) -> Quad {
-    var cursor = instance_cursor(instance_id * 40u);
+    var cursor = instance_cursor(instance_id * 44u);
     return Quad(
         read_word(&cursor),
         read_word(&cursor),
         read_bounds(&cursor),
-        read_bounds(&cursor),
+        read_content_mask(&cursor),
         read_background(&cursor),
         read_hsla(&cursor),
         read_corners(&cursor),
@@ -150,13 +154,13 @@ fn load_quad(instance_id: u32) -> Quad {
 }
 
 fn load_shadow(instance_id: u32) -> Shadow {
-    var cursor = instance_cursor(instance_id * 28u);
+    var cursor = instance_cursor(instance_id * 32u);
     return Shadow(
         read_word(&cursor),
         read_f32(&cursor),
         read_bounds(&cursor),
         read_corners(&cursor),
-        read_bounds(&cursor),
+        read_content_mask(&cursor),
         read_hsla(&cursor),
         read_bounds(&cursor),
         read_corners(&cursor),
@@ -181,12 +185,12 @@ fn load_path_sprite(instance_id: u32) -> PathSprite {
 }
 
 fn load_underline(instance_id: u32) -> Underline {
-    var cursor = instance_cursor(instance_id * 16u);
+    var cursor = instance_cursor(instance_id * 20u);
     return Underline(
         read_word(&cursor),
         read_word(&cursor),
         read_bounds(&cursor),
-        read_bounds(&cursor),
+        read_content_mask(&cursor),
         read_hsla(&cursor),
         read_f32(&cursor),
         read_word(&cursor),
@@ -194,12 +198,12 @@ fn load_underline(instance_id: u32) -> Underline {
 }
 
 fn load_mono_sprite(instance_id: u32) -> MonochromeSprite {
-    var cursor = instance_cursor(instance_id * 28u);
+    var cursor = instance_cursor(instance_id * 32u);
     return MonochromeSprite(
         read_word(&cursor),
         read_word(&cursor),
         read_bounds(&cursor),
-        read_bounds(&cursor),
+        read_content_mask(&cursor),
         read_hsla(&cursor),
         read_atlas_tile(&cursor),
         read_transformation(&cursor),
@@ -207,29 +211,29 @@ fn load_mono_sprite(instance_id: u32) -> MonochromeSprite {
 }
 
 fn load_poly_sprite(instance_id: u32) -> PolychromeSprite {
-    var cursor = instance_cursor(instance_id * 24u);
+    var cursor = instance_cursor(instance_id * 28u);
     return PolychromeSprite(
         read_word(&cursor),
         read_word(&cursor),
         read_word(&cursor),
         read_f32(&cursor),
         read_bounds(&cursor),
-        read_bounds(&cursor),
+        read_content_mask(&cursor),
         read_corners(&cursor),
         read_atlas_tile(&cursor),
     );
 }
 
-// 28 words: order, blur_radius, bounds(4), content_mask(4), corner_radii(4),
+// 32 words: order, blur_radius, bounds(4), content_mask(8), corner_radii(4),
 // lens, reach, magnify, dispersion, gain, saturation, tint(4), edge,
 // edge_width, edge_aa, opacity.
 fn load_backdrop_blur(instance_id: u32) -> BackdropBlur {
-    var cursor = instance_cursor(instance_id * 28u);
+    var cursor = instance_cursor(instance_id * 32u);
     return BackdropBlur(
         read_word(&cursor),
         read_f32(&cursor),
         read_bounds(&cursor),
-        read_bounds(&cursor),
+        read_content_mask(&cursor),
         read_corners(&cursor),
         read_f32(&cursor),
         read_f32(&cursor),

@@ -27,6 +27,7 @@ float quarter_ellipse_sdf(float2 point, float2 radii);
 float pick_corner_radius(float2 center_to_point, Corners_ScaledPixels corner_radii);
 float quad_sdf(float2 point, Bounds_ScaledPixels bounds,
                Corners_ScaledPixels corner_radii);
+float mask_alpha(float2 point, ContentMask_ScaledPixels mask);
 float quad_sdf_impl(float2 center_to_point, float corner_radius);
 float gaussian(float x, float sigma);
 float2 erf(float2 x);
@@ -115,7 +116,7 @@ fragment float4 quad_fragment(QuadFragmentInput input [[stage_in]],
       quad.border_widths.right == 0.0 &&
       quad.border_widths.bottom == 0.0 &&
       unrounded) {
-    return background_color;
+    return background_color * mask_alpha(input.position.xy, quad.content_mask);
   }
 
   float2 size = float2(quad.bounds.size.width, quad.bounds.size.height);
@@ -175,7 +176,7 @@ fragment float4 quad_fragment(QuadFragmentInput input [[stage_in]],
 
   // Fast path for points that must be part of the background
   if (is_within_inner_straight_border && !is_near_rounded_corner) {
-    return background_color;
+    return background_color * mask_alpha(input.position.xy, quad.content_mask);
   }
 
   // Signed distance of the point to the outside edge of the quad's border
@@ -393,7 +394,9 @@ fragment float4 quad_fragment(QuadFragmentInput input [[stage_in]],
                 saturate(antialias_threshold - inner_sdf));
   }
 
-  return color * float4(1.0, 1.0, 1.0, saturate(antialias_threshold - outer_sdf));
+  return color * float4(1.0, 1.0, 1.0,
+                        saturate(antialias_threshold - outer_sdf) *
+                            mask_alpha(input.position.xy, quad.content_mask));
 }
 
 // Returns the dash velocity of a corner given the dash velocity of the two
@@ -1074,6 +1077,20 @@ float quad_sdf(float2 point, Bounds_ScaledPixels bounds,
     float2 corner_to_point = fabs(center_to_point) - half_size;
     float2 corner_center_to_point = corner_to_point + corner_radius;
     return quad_sdf_impl(corner_center_to_point, corner_radius);
+}
+
+// Coverage of a fragment by a rounded content mask, to multiply into alpha.
+//
+// The mask's *rectangle* is already enforced in fixed function by
+// `[[clip_distance]]`, so this only has to carve the corners — and a square
+// mask, which is nearly all of them, costs one branch.
+float mask_alpha(float2 point, ContentMask_ScaledPixels mask) {
+  if (mask.corner_radii.top_left == 0.0 && mask.corner_radii.top_right == 0.0 &&
+      mask.corner_radii.bottom_right == 0.0 &&
+      mask.corner_radii.bottom_left == 0.0) {
+    return 1.0;
+  }
+  return saturate(0.5 - quad_sdf(point, mask.bounds, mask.corner_radii));
 }
 
 // Implementation of quad signed distance field

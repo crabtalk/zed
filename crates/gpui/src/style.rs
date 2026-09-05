@@ -648,15 +648,17 @@ impl Style {
             _ => {
                 let mut min = bounds.origin;
                 let mut max = bounds.bottom_right();
+                let mut inset = Edges::default();
 
                 if self
                     .border_color
                     .is_some_and(|color| !color.is_transparent())
                 {
-                    min.x += self.border_widths.left.to_pixels(rem_size);
-                    max.x -= self.border_widths.right.to_pixels(rem_size);
-                    min.y += self.border_widths.top.to_pixels(rem_size);
-                    max.y -= self.border_widths.bottom.to_pixels(rem_size);
+                    inset = self.border_widths.to_pixels(rem_size);
+                    min.x += inset.left;
+                    max.x -= inset.right;
+                    min.y += inset.top;
+                    max.y -= inset.bottom;
                 }
 
                 let bounds = match (
@@ -679,7 +681,25 @@ impl Style {
                     (false, false) => Bounds::from_corners(min, max),
                 };
 
-                Some(ContentMask { bounds })
+                // The mask curves with the element that owns it, inset by its
+                // border — a child of a rounded box is concentric with it, not
+                // pasted onto it. `clamp_radii_for_quad_size` keeps a radius
+                // past half the box from reading every fragment as outside.
+                // A corner backs off by the wider of the two borders meeting
+                // there, so the inner curve never pokes through either one.
+                let outer = self.corner_radii.to_pixels(rem_size);
+                let corner_radii = Corners {
+                    top_left: (outer.top_left - inset.left.max(inset.top)).max(px(0.)),
+                    top_right: (outer.top_right - inset.right.max(inset.top)).max(px(0.)),
+                    bottom_right: (outer.bottom_right - inset.right.max(inset.bottom)).max(px(0.)),
+                    bottom_left: (outer.bottom_left - inset.left.max(inset.bottom)).max(px(0.)),
+                }
+                .clamp_radii_for_quad_size(bounds.size);
+
+                Some(ContentMask {
+                    bounds,
+                    corner_radii,
+                })
             }
         }
     }

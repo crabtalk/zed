@@ -1982,13 +1982,26 @@ pub struct DispatchEventResult {
 }
 
 /// Indicates which region of the window is visible. Content falling outside of this mask will not be
-/// rendered. Currently, only rectangular content masks are supported, but we give the mask its own type
-/// to leave room to support more complex shapes in the future.
+/// rendered. A mask is a rectangle with optional corner radii, so a child of a rounded box is clipped
+/// to the shape rather than to its bounding box.
 #[derive(Copy, Clone, Debug, Default, PartialEq, Eq)]
 #[repr(C)]
 pub struct ContentMask<P: Clone + Debug + Default + PartialEq> {
     /// The bounds
     pub bounds: Bounds<P>,
+    /// The corners the mask is rounded at, clipping children to the shape
+    /// rather than to `bounds`. All zero is a plain rectangle.
+    pub corner_radii: Corners<P>,
+}
+
+impl<P: Clone + Debug + Default + PartialEq> ContentMask<P> {
+    /// A plain rectangular mask, the shape every mask had before corners.
+    pub fn new(bounds: Bounds<P>) -> Self {
+        Self {
+            bounds,
+            corner_radii: Corners::default(),
+        }
+    }
 }
 
 impl ContentMask<Pixels> {
@@ -1996,13 +2009,30 @@ impl ContentMask<Pixels> {
     pub fn scale(&self, factor: f32) -> ContentMask<ScaledPixels> {
         ContentMask {
             bounds: self.bounds.scale(factor),
+            corner_radii: self.corner_radii.scale(factor),
         }
     }
 
     /// Intersect the content mask with the given content mask.
+    ///
+    /// Two rounded rectangles do not intersect to a rounded rectangle, so only
+    /// the nested case — one mask wholly inside the other — keeps its corners:
+    /// whichever mask the intersection *is* supplies them. That covers every
+    /// mask a layout nests, and a genuine partial overlap of two rounded masks
+    /// falls back to the square intersection rather than inventing a shape.
     pub fn intersect(&self, other: &Self) -> Self {
         let bounds = self.bounds.intersect(&other.bounds);
-        ContentMask { bounds }
+        let corner_radii = if bounds == other.bounds {
+            other.corner_radii.clone()
+        } else if bounds == self.bounds {
+            self.corner_radii.clone()
+        } else {
+            Corners::default()
+        };
+        ContentMask {
+            bounds,
+            corner_radii,
+        }
     }
 }
 
@@ -2834,6 +2864,7 @@ impl Window {
     fn snapped_content_mask(&self) -> ContentMask<ScaledPixels> {
         ContentMask {
             bounds: self.cover_bounds(self.content_mask().bounds),
+            corner_radii: self.content_mask().corner_radii.scale(self.scale_factor()),
         }
     }
 
@@ -3941,15 +3972,12 @@ impl Window {
     /// Obtain the current content mask. This method should only be called during element drawing.
     pub fn content_mask(&self) -> ContentMask<Pixels> {
         self.invalidator.debug_assert_paint_or_prepaint();
-        self.content_mask_stack
-            .last()
-            .cloned()
-            .unwrap_or_else(|| ContentMask {
-                bounds: Bounds {
-                    origin: Point::default(),
-                    size: self.viewport_size,
-                },
+        self.content_mask_stack.last().cloned().unwrap_or_else(|| {
+            ContentMask::new(Bounds {
+                origin: Point::default(),
+                size: self.viewport_size,
             })
+        })
     }
 
     /// Provide elements in the called function with a new namespace in which their identifiers must be unique.
@@ -4468,10 +4496,11 @@ impl Window {
         for strip in strips {
             let content_mask_bounds = quad.content_mask.bounds.intersect(&strip);
             if !content_mask_bounds.is_empty() {
+                // Square: a strip is a sub-rect of the mask, so keeping the
+                // radii would test them against the wrong rectangle. A shadow
+                // cut out inside a rounded mask loses the curve, nothing else.
                 self.next_frame.scene.insert_primitive(Quad {
-                    content_mask: ContentMask {
-                        bounds: content_mask_bounds,
-                    },
+                    content_mask: ContentMask::new(content_mask_bounds),
                     ..quad
                 });
             }

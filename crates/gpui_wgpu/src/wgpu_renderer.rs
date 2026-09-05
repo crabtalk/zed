@@ -1359,9 +1359,15 @@ impl WgpuRenderer {
     fn backdrop_pair(&self, blur_radius: f32) -> Option<(wgpu::TextureView, wgpu::TextureView)> {
         let resources = self.resources();
         let (a, b) = if blur_radius <= BACKDROP_SMALL_SIGMA {
-            (&resources.backdrop_full_a_view, &resources.backdrop_full_b_view)
+            (
+                &resources.backdrop_full_a_view,
+                &resources.backdrop_full_b_view,
+            )
         } else {
-            (&resources.backdrop_blur_a_view, &resources.backdrop_blur_b_view)
+            (
+                &resources.backdrop_blur_a_view,
+                &resources.backdrop_blur_b_view,
+            )
         };
         Some((a.as_ref()?.clone(), b.as_ref()?.clone()))
     }
@@ -1384,9 +1390,24 @@ impl WgpuRenderer {
         };
         let first = binding.first_instance + blur_index as u32;
         for (label, pipeline, source, target) in [
-            ("backdrop_prefilter", &resources.pipelines.backdrop_downsample, scratch, a),
-            ("backdrop_gauss_h", &resources.pipelines.backdrop_gauss_h, a, b),
-            ("backdrop_gauss_v", &resources.pipelines.backdrop_gauss_v, b, a),
+            (
+                "backdrop_prefilter",
+                &resources.pipelines.backdrop_downsample,
+                scratch,
+                a,
+            ),
+            (
+                "backdrop_gauss_h",
+                &resources.pipelines.backdrop_gauss_h,
+                a,
+                b,
+            ),
+            (
+                "backdrop_gauss_v",
+                &resources.pipelines.backdrop_gauss_v,
+                b,
+                a,
+            ),
         ] {
             let bind_group = self.backdrop_bind_group(source, source);
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {

@@ -268,7 +268,7 @@ impl<E: IntoElement + 'static> Element for SpringAnimationElement<E> {
         cx: &mut App,
     ) -> (crate::LayoutId, Self::RequestLayoutState) {
         window.with_element_state(global_id.unwrap(), |state, window| {
-            let now = Instant::now();
+            let now = cx.background_executor().now();
             let initial = self.initial.unwrap_or(self.target);
             let mut state = state.unwrap_or_else(|| SpringElementState {
                 spring: SpringState {
@@ -399,8 +399,12 @@ impl<E: IntoElement + 'static> Element for AnimationElement<E> {
         cx: &mut App,
     ) -> (crate::LayoutId, Self::RequestLayoutState) {
         window.with_element_state(global_id.unwrap(), |state, window| {
+            // Read the clock through the executor rather than `Instant::now`, so
+            // that tests advancing the fake clock drive animations the same way
+            // they drive timers.
+            let now = cx.background_executor().now();
             let mut state = state.unwrap_or_else(|| AnimationState {
-                start: Instant::now(),
+                start: now,
                 animation_ix: 0,
                 delayed_frame_pending: Rc::new(Cell::new(false)),
             });
@@ -417,11 +421,11 @@ impl<E: IntoElement + 'static> Element for AnimationElement<E> {
                 let duration = self.animations[animation_ix].duration;
 
                 let elapsed = if self.animations[animation_ix].synced && !duration.is_zero() {
-                    let elapsed = cx.background_executor().now() - cx.synced_animation_epoch;
+                    let elapsed = now.saturating_duration_since(cx.synced_animation_epoch);
                     // Reduce modulo the duration before f32 conversion, which loses sub-second precision at scale.
                     Duration::from_nanos((elapsed.as_nanos() % duration.as_nanos()) as u64)
                 } else {
-                    state.start.elapsed()
+                    now.saturating_duration_since(state.start)
                 };
                 let mut delta = elapsed.as_secs_f32() / duration.as_secs_f32();
 
@@ -431,7 +435,7 @@ impl<E: IntoElement + 'static> Element for AnimationElement<E> {
                         if animation_ix >= self.animations.len() - 1 {
                             done = true;
                         } else {
-                            state.start = Instant::now();
+                            state.start = now;
                             state.animation_ix += 1;
                         }
                         delta = 1.0;
@@ -571,6 +575,10 @@ mod tests {
         max_fps: Option<f32>,
     }
 
+    struct OneshotAnimationTestView {
+        rendered_deltas: Rc<RefCell<Vec<f32>>>,
+    }
+
     struct SyncedAnimationTestView {
         show_second: bool,
         first_deltas: Rc<RefCell<Vec<f32>>>,
@@ -598,6 +606,20 @@ mod tests {
                 rendered_values.borrow_mut().push(value);
                 this.left(value)
             })
+        }
+    }
+
+    impl Render for OneshotAnimationTestView {
+        fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
+            let rendered_deltas = self.rendered_deltas.clone();
+            div().size_full().child(div().with_animation(
+                "oneshot-animation",
+                Animation::new(Duration::from_secs(1)),
+                move |this, delta| {
+                    rendered_deltas.borrow_mut().push(delta);
+                    this
+                },
+            ))
         }
     }
 
@@ -629,8 +651,6 @@ mod tests {
     impl Render for AnimationTestView {
         fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
             let rendered_deltas = self.rendered_deltas.clone();
-            // The throttled variant syncs to the shared clock so the deltas
-            // follow the test scheduler's clock rather than wall time.
             let mut animation = Animation::new(Duration::from_secs(1));
             if let Some(max_fps) = self.max_fps {
                 animation = animation.repeat_synced().with_max_fps(max_fps);
@@ -1013,6 +1033,35 @@ mod tests {
             .advance_clock(Duration::from_secs(300 * 24 * 60 * 60) + Duration::from_millis(500));
         simulate_next_frame(&window, cx);
         assert_eq!(*first_deltas.borrow().last().unwrap(), 0.25);
+    }
+
+    #[gpui::test]
+    fn test_unsynced_animation_advances_with_the_clock(cx: &mut TestAppContext) {
+        let rendered_deltas = Rc::new(RefCell::new(Vec::new()));
+        let window = cx.open_window(size(px(100.), px(100.)), {
+            let rendered_deltas = rendered_deltas.clone();
+            move |_, _| OneshotAnimationTestView { rendered_deltas }
+        });
+        cx.run_until_parked();
+        let last_delta = || *rendered_deltas.borrow().last().unwrap();
+
+        assert_eq!(*rendered_deltas.borrow(), vec![0.0]);
+
+        // Frames delivered without moving the clock must not advance the
+        // animation, however long the machine took to get here.
+        assert!(simulate_next_frame(&window, cx) > 0);
+        assert!(last_delta() < 1e-2, "delta: {}", last_delta());
+
+        // The test scheduler's clock jitters forward slightly on each poll, so
+        // compare against expectations loosely.
+        cx.executor().advance_clock(Duration::from_millis(500));
+        assert!(simulate_next_frame(&window, cx) > 0);
+        assert!((last_delta() - 0.5).abs() < 1e-2, "delta: {}", last_delta());
+
+        cx.executor().advance_clock(Duration::from_millis(600));
+        assert!(simulate_next_frame(&window, cx) > 0);
+        assert_eq!(last_delta(), 1.0);
+        assert_eq!(simulate_next_frame(&window, cx), 0);
     }
 
     #[gpui::test]

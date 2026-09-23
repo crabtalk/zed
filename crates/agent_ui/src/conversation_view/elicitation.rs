@@ -482,6 +482,7 @@ mod tests {
                 window.dispatch_event(
                     PlatformInput::KeyUp(KeyUpEvent {
                         keystroke: Keystroke::parse(key).expect("valid test keystroke"),
+                        layout: None,
                     }),
                     cx,
                 );

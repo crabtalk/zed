@@ -417,7 +417,10 @@ impl WindowsWindowInner {
 
     fn handle_syskeyup_msg(&self, wparam: WPARAM, lparam: LPARAM) -> Option<isize> {
         let input = handle_key_event(wparam, lparam, &self.state, |keystroke, _| {
-            PlatformInput::KeyUp(KeyUpEvent { keystroke })
+            PlatformInput::KeyUp(KeyUpEvent {
+                keystroke,
+                layout: None,
+            })
         })?;
         let mut func = self.state.callbacks.input.take()?;
 
@@ -440,6 +443,7 @@ impl WindowsWindowInner {
                     keystroke,
                     is_held: lparam.0 & (0x1 << 30) > 0,
                     prefer_character_input,
+                    layout: None,
                 })
             },
         ) else {
@@ -459,7 +463,10 @@ impl WindowsWindowInner {
 
     fn handle_keyup_msg(&self, wparam: WPARAM, lparam: LPARAM) -> Option<isize> {
         let Some(input) = handle_key_event(wparam, lparam, &self.state, |keystroke, _| {
-            PlatformInput::KeyUp(KeyUpEvent { keystroke })
+            PlatformInput::KeyUp(KeyUpEvent {
+                keystroke,
+                layout: None,
+            })
         }) else {
             return Some(1);
         };

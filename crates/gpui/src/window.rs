@@ -5719,6 +5719,7 @@ impl Window {
                 keystroke: keystroke.clone(),
                 is_held: false,
                 prefer_character_input: false,
+                layout: None,
             }),
             cx,
         );
@@ -6569,6 +6570,7 @@ impl Window {
                 keystroke: replay.keystroke.clone(),
                 is_held: false,
                 prefer_character_input: true,
+                layout: None,
             };
 
             cx.propagate_event = true;
@@ -8693,6 +8695,7 @@ mod tests {
                     keystroke: Keystroke::parse("down").expect("valid keystroke"),
                     is_held: false,
                     prefer_character_input: false,
+                    layout: None,
                 }),
                 cx,
             );
@@ -9402,12 +9405,12 @@ mod tests {
             canvas(
                 |_, _, _| {},
                 move |_, _, window, _| {
-                    window.content_mask_stack.push(ContentMask::new(
-                        Bounds::from_corners(
+                    window
+                        .content_mask_stack
+                        .push(ContentMask::new(Bounds::from_corners(
                             point(px(-1000.), px(-1000.)),
                             point(px(1000.), px(1000.)),
-                        ),
-                    ));
+                        )));
                     paint(window);
                     window.content_mask_stack.pop();
                 },

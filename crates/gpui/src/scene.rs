@@ -50,6 +50,10 @@ pub struct Scene {
     pub subpixel_sprites: Vec<SubpixelSprite>,
     pub polychrome_sprites: Vec<PolychromeSprite>,
     pub surfaces: Vec<PaintSurface>,
+    /// Backdrop-blur regions — deliberately OUTSIDE the primitive batch
+    /// stream: the renderer breaks its render pass at each blur's order to
+    /// snapshot the framebuffer (macOS Metal; other renderers ignore them).
+    pub backdrop_blurs: Vec<BackdropBlur>,
 }
 
 #[expect(missing_docs)]
@@ -66,6 +70,7 @@ impl Scene {
         self.subpixel_sprites.clear();
         self.polychrome_sprites.clear();
         self.surfaces.clear();
+        self.backdrop_blurs.clear();
     }
 
     pub fn len(&self) -> usize {
@@ -82,6 +87,42 @@ impl Scene {
     pub fn pop_layer(&mut self) {
         self.layer_stack.pop();
         self.paint_operations.push(PaintOperation::EndLayer);
+    }
+
+    /// The draw order of a batch's first primitive. Backdrop blurs sit outside
+    /// the batch stream, so this is what interleaves them back into it.
+    pub fn batch_first_order(&self, batch: &PrimitiveBatch) -> DrawOrder {
+        match batch {
+            PrimitiveBatch::Shadows(range) => self.shadows[range.start].order,
+            PrimitiveBatch::Quads(range) => self.quads[range.start].order,
+            PrimitiveBatch::Paths(range) => self.paths[range.start].order,
+            PrimitiveBatch::Underlines(range) => self.underlines[range.start].order,
+            PrimitiveBatch::MonochromeSprites { range, .. } => {
+                self.monochrome_sprites[range.start].order
+            }
+            PrimitiveBatch::SubpixelSprites { range, .. } => {
+                self.subpixel_sprites[range.start].order
+            }
+            PrimitiveBatch::PolychromeSprites { range, .. } => {
+                self.polychrome_sprites[range.start].order
+            }
+            PrimitiveBatch::Surfaces(range) => self.surfaces[range.start].order,
+        }
+    }
+
+    pub fn insert_backdrop_blur(&mut self, mut blur: BackdropBlur) {
+        let clipped_bounds = blur.bounds.intersect(&blur.content_mask.bounds);
+        if clipped_bounds.is_empty() {
+            return;
+        }
+        blur.order = self
+            .layer_stack
+            .last()
+            .copied()
+            .unwrap_or_else(|| self.primitive_bounds.insert(clipped_bounds));
+        self.backdrop_blurs.push(blur);
+        self.paint_operations
+            .push(PaintOperation::BackdropBlur(blur));
     }
 
     pub fn insert_primitive(&mut self, primitive: impl Into<Primitive>) {
@@ -142,6 +183,7 @@ impl Scene {
         for operation in &prev_scene.paint_operations[range] {
             match operation {
                 PaintOperation::Primitive(primitive) => self.insert_primitive(primitive.clone()),
+                PaintOperation::BackdropBlur(blur) => self.insert_backdrop_blur(*blur),
                 PaintOperation::StartLayer(bounds) => self.push_layer(*bounds),
                 PaintOperation::EndLayer => self.pop_layer(),
             }
@@ -160,6 +202,7 @@ impl Scene {
         self.polychrome_sprites
             .sort_by_key(|sprite| (sprite.order, sprite.tile.tile_id));
         self.surfaces.sort_by_key(|surface| surface.order);
+        self.backdrop_blurs.sort_by_key(|blur| blur.order);
     }
 
     #[cfg_attr(
@@ -213,6 +256,7 @@ pub(crate) enum PrimitiveKind {
 
 pub(crate) enum PaintOperation {
     Primitive(Primitive),
+    BackdropBlur(BackdropBlur),
     StartLayer(Bounds<ScaledPixels>),
     EndLayer,
 }
@@ -568,6 +612,49 @@ impl From<Underline> for Primitive {
     }
 }
 
+/// A within-window backdrop blur region: the renderer snapshots everything
+/// painted below this order and paints it back gaussian-blurred inside the
+/// rounded bounds (frosted-glass popovers). Implemented by the Metal and wgpu
+/// renderers — see [`crate::Window::paint_backdrop_blur`].
+#[derive(Debug, Copy, Clone)]
+#[repr(C)]
+#[expect(missing_docs)]
+pub struct BackdropBlur {
+    pub order: DrawOrder,
+    pub blur_radius: ScaledPixels,
+    pub bounds: Bounds<ScaledPixels>,
+    pub content_mask: ContentMask<ScaledPixels>,
+    pub corner_radii: Corners<ScaledPixels>,
+    /// How deep the lens profile reaches in from the rim; 0 paints a flat frost.
+    pub lens: ScaledPixels,
+    /// The furthest that profile may drag the backdrop.
+    pub reach: ScaledPixels,
+    /// Displacement amplitude. Signed: positive samples toward the centre, so
+    /// the interior magnifies and what it displaces compresses at the rim;
+    /// negative inverts that.
+    pub magnify: f32,
+    /// Per-channel spread of the displacement — the chromatic fringe.
+    pub dispersion: f32,
+    /// Slope of `out = gain * saturated(backdrop) + tint`.
+    pub gain: f32,
+    /// How far the backdrop's chroma is pushed from its own grey, before the
+    /// gain drops the level. 1 passes it through; above 1 a surface can go
+    /// dark without its colours going with it.
+    pub saturation: f32,
+    /// Its offset. Transparent leaves the blur bare.
+    pub tint: Hsla,
+    /// How much white the lit rim adds, 0..1.
+    pub edge: f32,
+    /// How far in that light falls off to nothing.
+    pub edge_width: ScaledPixels,
+    /// Width of the coverage ramp at the boundary. Zero is a hard edge.
+    pub edge_aa: ScaledPixels,
+    /// The element tree's opacity here. The pass replaces its region rather
+    /// than blending, so a fading material has to mix itself back toward the
+    /// untouched backdrop; this rides the coverage that already does it.
+    pub opacity: f32,
+}
+
 #[derive(Debug, Copy, Clone)]
 #[repr(C)]
 #[expect(missing_docs)]
@@ -580,7 +667,11 @@ pub struct Shadow {
     pub color: Hsla,
     pub element_bounds: Bounds<ScaledPixels>,
     pub element_corner_radii: Corners<ScaledPixels>,
-    /// 0 = drop shadow (rendered outside the element), 1 = inset shadow (rendered inside).
+    /// 0 = drop shadow, 1 = inset shadow (rendered inside the element), 2 = a
+    /// drop shadow clipped to outside the element. A plain drop shadow does not
+    /// cut its own element out — nothing notices while an opaque fill covers
+    /// the middle, but a surface whose fill lives in a later pass needs the
+    /// hole.
     pub inset: u32,
     pub pad: u32, // align to 8 bytes
 }

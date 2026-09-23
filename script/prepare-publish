@@ -61,7 +61,27 @@ UNPUBLISHABLE = {
 EXCLUDE = {"util"}
 
 
+# Build scripts that read a sibling crate's sources, as `crate -> (escaping
+# path, files read under it)`. gpui_apple runs cbindgen over gpui's geometry
+# and scene types to emit the Metal shader header.
+#
+# This escapes the package the way an `include!` does, but fails louder and
+# later: `cargo publish` builds the tarball to verify it, so the error lands
+# after every crate ahead of it in the order is already on crates.io and its
+# version is spent.
+VENDOR_BUILD_SRC = {
+    "gpui_apple": ("../gpui", (
+        "src/scene.rs",
+        "src/geometry.rs",
+        "src/color.rs",
+        "src/window.rs",
+        "src/platform.rs",
+    )),
+}
+
+
 INCLUDE = re.compile(r'include_(?:bytes|str)!\(\s*"([^"]+)"\s*\)')
+ESCAPING_LITERAL = re.compile(r'"(\.\./[^"]*)"')
 
 
 def escaping_includes(crate):
@@ -100,6 +120,43 @@ def vendor_includes(crate, root, dry):
         if not dry:
             source.write_text(source.read_text().replace(f'"{literal}"', f'"{rel}"'))
     return len(copied)
+
+
+def escaping_build_paths(crate):
+    """Relative paths in the crate's build script that climb out of the package."""
+    build = crate / "build.rs"
+    if build.exists():
+        for match in ESCAPING_LITERAL.finditer(build.read_text()):
+            yield match.group(1)
+
+
+def vendor_build_src(crate, name, root, dry):
+    """Copy the sources a build script reads into the crate, and repoint it.
+
+    The copy lands at the escaping path's last component, so the literal loses
+    only its `../` and the paths joined onto it still resolve.
+    """
+    if name not in VENDOR_BUILD_SRC:
+        return
+    literal, files = VENDOR_BUILD_SRC[name]
+    build = crate / "build.rs"
+    text = build.read_text()
+    if f'"{literal}"' not in text:
+        sys.exit(f"{name}: build.rs no longer names {literal!r}; "
+                 f"VENDOR_BUILD_SRC is stale")
+    source_dir = (crate / literal).resolve()
+    for rel in files:
+        source = source_dir / rel
+        if not source.exists():
+            sys.exit(f"{name}: build.rs source {source} is missing; "
+                     f"VENDOR_BUILD_SRC is stale")
+        print(f"    vendor {source.relative_to(root)}")
+        if not dry:
+            dest = crate / Path(literal).name / rel
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(source, dest)
+    if not dry:
+        build.write_text(text.replace(f'"{literal}"', f'"{Path(literal).name}"'))
 
 
 def strip_dev_deps(text):
@@ -342,6 +399,7 @@ def main():
             manifest.write_text(new)
             readme.write_text(f"{header}\n{body}" if MARKER not in body else body)
         vendor_includes(manifest.parent, root, dry)
+        vendor_build_src(manifest.parent, name, root, dry)
 
     root_manifest = root / "Cargo.toml"
     new_root = rewrite_root(root_manifest.read_text(), sorted(crates), version, outside)
@@ -353,8 +411,11 @@ def main():
     if not dry:
         escaped = [f"{name}: {lit}" for name, manifest in sorted(crates.items())
                    for _, lit, _ in escaping_includes(manifest.parent)]
+        escaped += [f"{name}: build.rs {lit}"
+                    for name, manifest in sorted(crates.items())
+                    for lit in escaping_build_paths(manifest.parent)]
         if escaped:
-            sys.exit("include! escapes its package after vendoring:\n  "
+            sys.exit("path escapes its package after vendoring:\n  "
                      + "\n  ".join(escaped))
 
     print("\npublish order:")

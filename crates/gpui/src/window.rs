@@ -5184,9 +5184,17 @@ impl Window {
                 .size
                 .map(|value| ScaledPixels(value.0 as f32 / SMOOTH_SVG_SCALE_FACTOR)),
         };
+        // Down, never up. `to_tile_position` maps this quad's unit square onto
+        // the whole tile whatever size the quad is, so a quad rounded past
+        // `tile / SMOOTH_SVG_SCALE_FACTOR` puts its outermost sample past the
+        // tile's edge — and tiles are packed edge to edge, so what it reads
+        // there is the glyph allocated next to it. At or under that size every
+        // sample falls at texel 0.5 or further in.
         let final_bounds = svg_bounds
             .map_origin(|value| ScaledPixels(round_half_toward_zero(value.0)))
-            .map_size(|size| size.ceil());
+            // A tile of one texel still has to paint: at one pixel the only
+            // sample lands at texel 0.5, which is inside it.
+            .map_size(|size| ScaledPixels(size.0.floor().max(1.)));
 
         self.next_frame.scene.insert_primitive(MonochromeSprite {
             order: 0,

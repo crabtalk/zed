@@ -1380,10 +1380,9 @@ impl Drop for MacWindow {
         // hosts alive. Together with the `Arc<Mutex<MacWindowState>>` parked in
         // both views' `windowState` ivar, that forms
         // `MacWindowState -> adapter -> content view -> GPUIView -> MacWindowState`,
-        // a cycle the delegate/`frame_source` teardown below cannot break. Drop
-        // the adapter here so the native view, its `CAMetalLayer` and the
-        // renderer's command queue are actually released with the window.
-        drop(this.accesskit_adapter.take());
+        // a cycle the delegate/`frame_source` teardown below cannot break. The
+        // adapter is dropped in the close task below.
+        let accesskit_adapter = this.accesskit_adapter.take();
         this.renderer.destroy();
         let window = this.native_window;
         let sheet_parent = this.sheet_parent.take();
@@ -1402,6 +1401,14 @@ impl Drop for MacWindow {
                         let _: () = msg_send![parent, endSheet: window];
                     }
                     window.close();
+                    // Dropping the adapter restores the content view's class
+                    // as it was before the adapter subclassed it, discarding
+                    // the KVO subclass AppKit's touch bar finder installs to
+                    // observe `nextResponder`. The finder removes that
+                    // observation during a display-cycle flush; removing it
+                    // after the restore raises `NSRangeException`.
+                    let _: () = msg_send![class!(CATransaction), flush];
+                    drop(accesskit_adapter);
                     window.autorelease();
                 }
             })

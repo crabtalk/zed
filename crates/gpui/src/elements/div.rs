@@ -4630,6 +4630,50 @@ mod tests {
         assert_eq!(*hover_transitions.borrow(), [true, false]);
     }
 
+    #[gpui::test]
+    fn default_hover_listener_stays_off_after_mouse_exits_window(cx: &mut TestAppContext) {
+        let hover_transitions = Rc::new(RefCell::new(Vec::new()));
+        let window = cx.add_window({
+            let hover_transitions = hover_transitions.clone();
+            move |_, _| HoverListenerLayoutTestView {
+                target_left: px(0.),
+                hover_transitions,
+            }
+        });
+        let any_window = AnyWindowHandle::from(window);
+
+        cx.update_window(any_window, |_, window, cx| {
+            window.draw(cx).clear(cx);
+            window.simulate_mouse_move(point(px(10.), px(10.)), cx);
+        })
+        .unwrap();
+        assert_eq!(*hover_transitions.borrow(), [true]);
+
+        cx.update_window(any_window, |_, window, cx| {
+            window.dispatch_event(
+                MouseExitEvent {
+                    position: point(px(10.), px(10.)),
+                    pressed_button: None,
+                    modifiers: crate::Modifiers::default(),
+                }
+                .to_platform_input(),
+                cx,
+            );
+            window.refresh();
+            window.draw(cx).clear(cx);
+            window.refresh();
+            window.draw(cx).clear(cx);
+        })
+        .unwrap();
+        assert_eq!(*hover_transitions.borrow(), [true, false]);
+
+        cx.update_window(any_window, |_, window, cx| {
+            window.simulate_mouse_move(point(px(10.), px(10.)), cx);
+        })
+        .unwrap();
+        assert_eq!(*hover_transitions.borrow(), [true, false, true]);
+    }
+
     struct HoverListenerModeLayoutTestView {
         target_left: Pixels,
         hover_transitions: Rc<RefCell<Vec<bool>>>,

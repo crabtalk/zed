@@ -1222,6 +1222,9 @@ pub struct Window {
     focus_lost_path: SmallVec<[FocusId; 8]>,
     default_prevented: bool,
     mouse_position: Point<Pixels>,
+    /// Set by `MouseExited` and cleared by the next event that carries a pointer position.
+    /// While set, `mouse_position` is the last position inside the window and hits nothing.
+    mouse_exited: bool,
     mouse_hit_test: HitTest,
     modifiers: Modifiers,
     capslock: Capslock,
@@ -2109,6 +2112,7 @@ impl Window {
             focus_lost_path: SmallVec::new(),
             default_prevented: true,
             mouse_position,
+            mouse_exited: false,
             mouse_hit_test: HitTest::default(),
             modifiers,
             capslock,
@@ -3651,7 +3655,7 @@ impl Window {
             tooltip_element = self.prepaint_tooltip(cx);
         }
 
-        self.mouse_hit_test = self.next_frame.hit_test(self.mouse_position);
+        self.mouse_hit_test = self.pointer_hit_test(&self.next_frame);
 
         // Now actually paint the elements.
         self.invalidator.set_phase(DrawPhase::Paint);
@@ -5889,6 +5893,18 @@ impl Window {
             PlatformInput::KeyDown(_) | PlatformInput::KeyUp(_) => event,
         };
 
+        match &event {
+            PlatformInput::MouseExited(_) => self.mouse_exited = true,
+            PlatformInput::MouseMove(_)
+            | PlatformInput::MouseDown(_)
+            | PlatformInput::MouseUp(_)
+            | PlatformInput::ScrollWheel(_)
+            | PlatformInput::Pinch(_)
+            | PlatformInput::LongPress(_)
+            | PlatformInput::TouchDrag(_) => self.mouse_exited = false,
+            _ => {}
+        }
+
         if let Some(any_mouse_event) = event.mouse_event() {
             self.dispatch_mouse_event(any_mouse_event, cx);
         } else if let Some(any_key_event) = event.keyboard_event() {
@@ -6092,8 +6108,16 @@ impl Window {
         });
     }
 
+    fn pointer_hit_test(&self, frame: &Frame) -> HitTest {
+        if self.mouse_exited {
+            HitTest::default()
+        } else {
+            frame.hit_test(self.mouse_position)
+        }
+    }
+
     fn dispatch_mouse_event(&mut self, event: &dyn Any, cx: &mut App) {
-        let hit_test = self.rendered_frame.hit_test(self.mouse_position());
+        let hit_test = self.pointer_hit_test(&self.rendered_frame);
         if hit_test != self.mouse_hit_test {
             self.mouse_hit_test = hit_test;
             self.reset_cursor_style(cx);

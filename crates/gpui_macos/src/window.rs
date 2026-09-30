@@ -298,6 +298,7 @@ unsafe fn build_classes() {
         };
         BLURRED_VIEW_CLASS = {
             let mut decl = ClassDecl::new("BlurredView", class!(NSVisualEffectView)).unwrap();
+            decl.add_ivar::<f64>("backgroundBlur");
             decl.add_method(
                 sel!(initWithFrame:),
                 blurred_view_init_with_frame as extern "C" fn(&Object, Sel, NSRect) -> id,
@@ -662,6 +663,7 @@ struct MacWindowState {
     native_view: NonNull<Object>,
     blurred_view: Option<id>,
     background_appearance: WindowBackgroundAppearance,
+    background_blur: f64,
     cursor_style: CursorStyle,
     cursor_visible: Arc<AtomicBool>,
     frame_source: Option<WindowFrameSource>,
@@ -1095,6 +1097,7 @@ impl MacWindow {
                 native_view: NonNull::new_unchecked(native_view),
                 blurred_view: None,
                 background_appearance: WindowBackgroundAppearance::Opaque,
+                background_blur: 60.0,
                 cursor_style: CursorStyle::Arrow,
                 cursor_visible,
                 frame_source: None,
@@ -1888,6 +1891,7 @@ impl PlatformWindow for MacWindow {
                 let frame = NSView::bounds(content_view);
                 let mut blur_view: id = msg_send![BLURRED_VIEW_CLASS, alloc];
                 blur_view = NSView::initWithFrame_(blur_view, frame);
+                (*blur_view).set_ivar("backgroundBlur", this.background_blur);
                 blur_view.setAutoresizingMask_(NSViewWidthSizable | NSViewHeightSizable);
 
                 let _: () = msg_send![
@@ -1897,6 +1901,17 @@ impl PlatformWindow for MacWindow {
                     relativeTo: nil
                 ];
                 this.blurred_view = Some(blur_view.autorelease());
+            }
+        }
+    }
+
+    fn set_background_blur(&self, radius: f64) {
+        let mut this = self.0.lock();
+        this.background_blur = radius;
+        if let Some(blur_view) = this.blurred_view {
+            unsafe {
+                (*blur_view).set_ivar("backgroundBlur", radius);
+                let _: () = msg_send![blur_view, setNeedsDisplay: YES];
             }
         }
     }
@@ -3746,7 +3761,8 @@ fn display_id_for_screen(screen: id) -> Option<CGDirectDisplayID> {
 
 extern "C" fn blurred_view_init_with_frame(this: &Object, _: Sel, frame: NSRect) -> id {
     unsafe {
-        let view = msg_send![super(this, class!(NSVisualEffectView)), initWithFrame: frame];
+        let view: id = msg_send![super(this, class!(NSVisualEffectView)), initWithFrame: frame];
+        (*view).set_ivar("backgroundBlur", 60.0f64);
         // Use a colorless semantic material. The default value `AppearanceBased`, though not
         // manually set, is deprecated.
         NSVisualEffectView::setMaterial_(view, NSVisualEffectMaterial::Selection);
@@ -3760,7 +3776,7 @@ extern "C" fn blurred_view_update_layer(this: &Object, _: Sel) {
         let _: () = msg_send![super(this, class!(NSVisualEffectView)), updateLayer];
         let layer: id = msg_send![this, layer];
         if !layer.is_null() {
-            remove_layer_background(layer);
+            remove_layer_background(layer, *this.get_ivar::<f64>("backgroundBlur"));
             // Fallback base BEHIND the backdrop sublayer. Mission Control and
             // the Spaces switcher render window SNAPSHOTS, which omit backdrop
             // layers entirely — with every background stripped above, the
@@ -3775,7 +3791,7 @@ extern "C" fn blurred_view_update_layer(this: &Object, _: Sel) {
     }
 }
 
-unsafe fn remove_layer_background(layer: id) {
+unsafe fn remove_layer_background(layer: id, blur_radius: f64) {
     unsafe {
         let _: () = msg_send![layer, setBackgroundColor:nil];
 
@@ -3788,10 +3804,6 @@ unsafe fn remove_layer_background(layer: id) {
 
         let filters: id = msg_send![layer, filters];
         if !filters.is_null() {
-            // Crank the backdrop blur: the material's default gaussian radius
-            // is tuned for thin translucency; the glass shell runs a heavy
-            // scrim over it, and a wider blur under that scrim reads calmer
-            // (user request — lower alpha, more blur).
             let blur_test: id = ns_string("Blur");
             let count = NSArray::count(filters);
             for i in 0..count {
@@ -3799,7 +3811,7 @@ unsafe fn remove_layer_background(layer: id) {
                 let description: id = msg_send![filter, description];
                 let hit: BOOL = msg_send![description, containsString: blur_test];
                 if hit == YES {
-                    let radius: id = msg_send![class!(NSNumber), numberWithDouble: 60.0f64];
+                    let radius: id = msg_send![class!(NSNumber), numberWithDouble: blur_radius];
                     let _: () =
                         msg_send![filter, setValue: radius forKey: ns_string("inputRadius")];
                     let _: () = msg_send![layer, setFilters: filters];
@@ -3838,7 +3850,7 @@ unsafe fn remove_layer_background(layer: id) {
             let count = NSArray::count(sublayers);
             for i in 0..count {
                 let sublayer = sublayers.objectAtIndex(i);
-                remove_layer_background(sublayer);
+                remove_layer_background(sublayer, blur_radius);
             }
         }
     }
@@ -3930,3 +3942,7 @@ mod tests {
         assert_eq!(display_id_for_screen(nil), None);
     }
 }
+
+#[cfg(test)]
+#[path = "../tests/window_blur/tests.rs"]
+mod blur_tests;

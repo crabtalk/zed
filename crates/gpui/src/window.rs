@@ -1585,6 +1585,7 @@ impl Window {
             is_minimizable,
             display_id,
             window_background,
+            window_background_blur,
             app_id,
             window_min_size,
             window_decorations,
@@ -1651,6 +1652,9 @@ impl Window {
 
         platform_window
             .request_decorations(window_decorations.unwrap_or(WindowDecorations::Server));
+        if window_background_blur.is_finite() {
+            platform_window.set_background_blur(window_background_blur.max(0.0));
+        }
         platform_window.set_background_appearance(window_background);
 
         match window_bounds {
@@ -2981,6 +2985,16 @@ impl Window {
     pub fn set_background_appearance(&self, background_appearance: WindowBackgroundAppearance) {
         self.platform_window
             .set_background_appearance(background_appearance);
+    }
+
+    /// Sets the backdrop blur radius in native filter pixels, without scale conversion.
+    /// Only affects macOS `Blurred` backgrounds; other platforms keep their existing appearance.
+    /// Zero disables blur without changing transparency, tint, or foreground content.
+    /// Negative values become zero; non-finite values are ignored.
+    pub fn set_background_blur(&self, radius: f64) {
+        if radius.is_finite() {
+            self.platform_window.set_background_blur(radius.max(0.0));
+        }
     }
 
     /// Mark the window as dirty at the platform level.
@@ -9665,3 +9679,7 @@ mod inspector_tests {
         .expect("closed inspector has no bookkeeping and no style overrides");
     }
 }
+
+#[cfg(test)]
+#[path = "../tests/window_background/tests.rs"]
+mod window_background_tests;

@@ -934,6 +934,8 @@ pub trait PlatformWindow: HasWindowHandle + HasDisplayHandle {
     fn background_appearance(&self) -> WindowBackgroundAppearance;
     fn set_title(&mut self, title: &str);
     fn set_background_appearance(&self, background_appearance: WindowBackgroundAppearance);
+    /// Sets the backdrop filter radius. Unsupported platforms keep their existing appearance.
+    fn set_background_blur(&self, _radius: f64) {}
     fn minimize(&self);
     fn zoom(&self);
     fn toggle_fullscreen(&self);
@@ -2231,6 +2233,12 @@ pub struct WindowOptions {
     /// The appearance of the window background.
     pub window_background: WindowBackgroundAppearance,
 
+    /// Backdrop blur radius in native filter pixels, passed to macOS without scale conversion.
+    /// Defaults to 60.0. Zero disables blur while retaining transparency and background tint.
+    /// Only affects `Blurred` backgrounds on macOS; other platforms keep their existing appearance.
+    /// Negative values become zero; non-finite values leave the default unchanged.
+    pub window_background_blur: f64,
+
     /// Application identifier of the window. Can by used by desktop environments to group applications together.
     pub app_id: Option<String>,
 
@@ -2367,6 +2375,7 @@ impl Default for WindowOptions {
             is_minimizable: true,
             display_id: None,
             window_background: WindowBackgroundAppearance::default(),
+            window_background_blur: 60.0,
             icon: None,
             app_id: None,
             window_min_size: None,

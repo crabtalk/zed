@@ -23,6 +23,7 @@ pub(crate) struct TestWindowState {
     display: Rc<dyn PlatformDisplay>,
     pub(crate) title: Option<String>,
     pub(crate) edited: bool,
+    pub(crate) background_blur: f64,
     pub(crate) document_path: Option<std::path::PathBuf>,
     platform: Weak<TestPlatform>,
     // TODO: Replace with `Rc`
@@ -100,6 +101,7 @@ impl TestWindow {
             renderer,
             title: Default::default(),
             edited: false,
+            background_blur: 60.0,
             document_path: None,
             should_close_handler: None,
             hit_test_window_control_callback: None,
@@ -431,6 +433,10 @@ impl PlatformWindow for TestWindow {
     fn set_app_id(&mut self, _app_id: &str) {}
 
     fn set_background_appearance(&self, _background: WindowBackgroundAppearance) {}
+
+    fn set_background_blur(&self, radius: f64) {
+        self.0.lock().background_blur = radius;
+    }
 
     fn set_edited(&mut self, edited: bool) {
         self.0.lock().edited = edited;

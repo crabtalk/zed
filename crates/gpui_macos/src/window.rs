@@ -1911,7 +1911,12 @@ impl PlatformWindow for MacWindow {
         if let Some(blur_view) = this.blurred_view {
             unsafe {
                 (*blur_view).set_ivar("backgroundBlur", radius);
-                let _: () = msg_send![blur_view, setNeedsDisplay: YES];
+                // `setNeedsDisplay:` does not bring `updateLayer` back round on
+                // an `NSVisualEffectView`, so the filters are rewritten here.
+                let layer: id = msg_send![blur_view, layer];
+                if !layer.is_null() {
+                    remove_layer_background(layer, radius);
+                }
             }
         }
     }
@@ -3811,10 +3816,24 @@ unsafe fn remove_layer_background(layer: id, blur_radius: f64) {
                 let description: id = msg_send![filter, description];
                 let hit: BOOL = msg_send![description, containsString: blur_test];
                 if hit == YES {
+                    // A fresh filter in a fresh array: Core Animation does not
+                    // re-render a committed layer whose filter was mutated in
+                    // place and handed back.
                     let radius: id = msg_send![class!(NSNumber), numberWithDouble: blur_radius];
-                    let _: () =
-                        msg_send![filter, setValue: radius forKey: ns_string("inputRadius")];
-                    let _: () = msg_send![layer, setFilters: filters];
+                    let blur: id = msg_send![filter, copy];
+                    let _: () = msg_send![blur, setValue: radius forKey: ns_string("inputRadius")];
+                    // Without it the blur samples nothing past the window's
+                    // edge and darkens a band there as wide as the radius.
+                    let core_image: BOOL = msg_send![blur, isKindOfClass: class!(CIFilter)];
+                    if core_image == NO {
+                        let yes: id = msg_send![class!(NSNumber), numberWithBool: YES];
+                        let _: () = msg_send![blur, setValue: yes forKey: ns_string("inputNormalizeEdges")];
+                    }
+                    let replaced: id = msg_send![filters, mutableCopy];
+                    let _: () = msg_send![replaced, replaceObjectAtIndex: i withObject: blur];
+                    let _: () = msg_send![layer, setFilters: replaced];
+                    let _: () = msg_send![blur, release];
+                    let _: () = msg_send![replaced, release];
                     break;
                 }
             }
@@ -3824,6 +3843,7 @@ unsafe fn remove_layer_background(layer: id, blur_radius: f64) {
             // uses a `CAFilter` named "colorSaturate". If one day they switch to `CIFilter`, the
             // `description` will still contain "Saturat" ("... inputSaturation = ...").
             let test_string: id = ns_string("Saturat");
+            let filters: id = msg_send![layer, filters];
             let count = NSArray::count(filters);
             for i in 0..count {
                 let description: id = msg_send![filters.objectAtIndex(i), description];

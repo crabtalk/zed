@@ -14,7 +14,9 @@ fn backdrop_radius_updates_nested_filters_without_changing_layer_opacity() {
 
         for radius in [60.0, 24.0, 0.0, 42.0] {
             remove_layer_background(root, radius);
-            let value: id = msg_send![blur, valueForKey: ns_string("inputRadius")];
+            let filters: id = msg_send![backdrop, filters];
+            let value: id =
+                msg_send![filters.objectAtIndex(0), valueForKey: ns_string("inputRadius")];
             let actual: f64 = msg_send![value, doubleValue];
             assert_eq!(actual, radius);
             let opacity: f32 = msg_send![root, opacity];

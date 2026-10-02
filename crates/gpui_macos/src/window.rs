@@ -664,6 +664,9 @@ struct MacWindowState {
     blurred_view: Option<id>,
     background_appearance: WindowBackgroundAppearance,
     background_blur: f64,
+    /// Set from `WindowParams::show` and taken by the first `draw`, which
+    /// orders the window front — `Some(true)` also makes it key.
+    pending_show: Option<bool>,
     cursor_style: CursorStyle,
     cursor_visible: Arc<AtomicBool>,
     frame_source: Option<WindowFrameSource>,
@@ -1098,6 +1101,7 @@ impl MacWindow {
                 blurred_view: None,
                 background_appearance: WindowBackgroundAppearance::Opaque,
                 background_blur: 60.0,
+                pending_show: None,
                 cursor_style: CursorStyle::Arrow,
                 cursor_visible,
                 frame_source: None,
@@ -1288,10 +1292,11 @@ impl MacWindow {
                 }
             }
 
-            if focus && show {
-                native_window.makeKeyAndOrderFront_(nil);
-            } else if show {
-                native_window.orderFront_(nil);
+            // Ordered front by the first `draw`: a window shown before it has
+            // a frame opens and closes as a black rectangle in AppKit's zoom
+            // animation.
+            if show {
+                window.0.lock().pending_show = Some(focus);
             }
 
             // Set the initial position of the window to the specified origin.
@@ -2140,6 +2145,16 @@ impl PlatformWindow for MacWindow {
     fn draw(&self, scene: &gpui::Scene) {
         let mut this = self.0.lock();
         this.renderer.draw(scene);
+        if let Some(focus) = this.pending_show.take() {
+            let native_window = this.native_window;
+            drop(this);
+            unsafe {
+                match focus {
+                    true => native_window.makeKeyAndOrderFront_(nil),
+                    false => native_window.orderFront_(nil),
+                }
+            }
+        }
     }
 
     fn gpu_time(&self) -> Option<std::time::Duration> {

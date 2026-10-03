@@ -2216,16 +2216,18 @@ impl ContentMask<Pixels> {
     /// Intersect the content mask with the given content mask.
     ///
     /// Two rounded rectangles do not intersect to a rounded rectangle, so only
-    /// the nested case — one mask wholly inside the other — keeps its corners:
-    /// whichever mask the intersection *is* supplies them. That covers every
-    /// mask a layout nests, and a genuine partial overlap of two rounded masks
-    /// falls back to the square intersection rather than inventing a shape.
+    /// the nested case — one mask wholly inside the other — keeps its corners.
+    /// The inner mask supplies each corner, except where that corner sits on
+    /// the outer mask's own: there the larger radius of the two wins, so a
+    /// rounded mask stays rounded through any square masks nested flush in it.
+    /// A genuine partial overlap of two rounded masks falls back to the square
+    /// intersection rather than inventing a shape.
     pub fn intersect(&self, other: &Self) -> Self {
         let bounds = self.bounds.intersect(&other.bounds);
         let corner_radii = if bounds == other.bounds {
-            other.corner_radii.clone()
+            nested_corners(other, self)
         } else if bounds == self.bounds {
-            self.corner_radii.clone()
+            nested_corners(self, other)
         } else {
             Corners::default()
         };
@@ -2233,6 +2235,25 @@ impl ContentMask<Pixels> {
             bounds,
             corner_radii,
         }
+    }
+}
+
+/// The corners of `inner` nested in `outer`, each taking the larger radius
+/// where it coincides with the outer mask's corner.
+fn nested_corners(inner: &ContentMask<Pixels>, outer: &ContentMask<Pixels>) -> Corners<Pixels> {
+    let (i, o) = (&inner.bounds, &outer.bounds);
+    let (ir, or) = (&inner.corner_radii, &outer.corner_radii);
+    let corner = |shared: bool, inner: Pixels, outer: Pixels| match shared {
+        true => inner.max(outer),
+        false => inner,
+    };
+    let (left, right) = (i.left() == o.left(), i.right() == o.right());
+    let (top, bottom) = (i.top() == o.top(), i.bottom() == o.bottom());
+    Corners {
+        top_left: corner(top && left, ir.top_left, or.top_left),
+        top_right: corner(top && right, ir.top_right, or.top_right),
+        bottom_right: corner(bottom && right, ir.bottom_right, or.bottom_right),
+        bottom_left: corner(bottom && left, ir.bottom_left, or.bottom_left),
     }
 }
 

@@ -559,7 +559,8 @@ fragment float4 shadow_fragment(ShadowFragmentInput input [[stage_in]],
     alpha *= saturate(0.5 + element_distance);
   }
 
-  return input.color * float4(1., 1., 1., alpha);
+  return input.color *
+         float4(1., 1., 1., alpha * mask_alpha(input.position.xy, shadow.content_mask));
 }
 
 struct UnderlineVertexOutput {
@@ -620,9 +621,11 @@ fragment float4 underline_fragment(UnderlineFragmentInput input [[stage_in]],
     float distance_from_bottom_border = distance_in_pixels + half_thickness;
     float alpha = saturate(
         0.5 - max(-distance_from_bottom_border, distance_from_top_border));
-    return input.color * float4(1., 1., 1., alpha);
+    return input.color *
+           float4(1., 1., 1., alpha * mask_alpha(input.position.xy, underline.content_mask));
   } else {
-    return input.color;
+    return input.color *
+           float4(1., 1., 1., mask_alpha(input.position.xy, underline.content_mask));
   }
 }
 
@@ -630,6 +633,7 @@ struct MonochromeSpriteVertexOutput {
   float4 position [[position]];
   float2 tile_position;
   float4 color [[flat]];
+  uint sprite_id [[flat]];
   float4 clip_distance;
 };
 
@@ -637,6 +641,7 @@ struct MonochromeSpriteFragmentInput {
   float4 position [[position]];
   float2 tile_position;
   float4 color [[flat]];
+  uint sprite_id [[flat]];
   float4 clip_distance;
 };
 
@@ -660,6 +665,7 @@ vertex MonochromeSpriteVertexOutput monochrome_sprite_vertex(
       device_position,
       tile_position,
       color,
+      sprite_id,
       {clip_distance.x, clip_distance.y, clip_distance.z, clip_distance.w}};
 }
 
@@ -676,7 +682,7 @@ fragment float4 monochrome_sprite_fragment(
   float4 sample =
       atlas_texture.sample(atlas_texture_sampler, input.tile_position);
   float4 color = input.color;
-  color.a *= sample.a;
+  color.a *= sample.a * mask_alpha(input.position.xy, sprites[input.sprite_id].content_mask);
   return color;
 }
 
@@ -735,7 +741,8 @@ fragment float4 polychrome_sprite_fragment(
     color.g = grayscale;
     color.b = grayscale;
   }
-  color.a *= sprite.opacity * saturate(0.5 - distance);
+  color.a *= sprite.opacity * saturate(0.5 - distance) *
+             mask_alpha(input.position.xy, sprite.content_mask);
   return color;
 }
 
@@ -799,6 +806,9 @@ fragment float4 path_rasterization_fragment(
     float distance = f / length(gradient);
     alpha = saturate(0.5 - distance);
   }
+  // The path sprite pass may draw several paths as one union quad, so the
+  // rounded mask is applied here, per path.
+  alpha *= mask_alpha(input.position.xy, v.content_mask);
 
   GradientColor gradient_color = prepare_fill_color(
     background.tag,
@@ -858,12 +868,14 @@ fragment float4 path_sprite_fragment(
 struct SurfaceVertexOutput {
   float4 position [[position]];
   float2 texture_position;
+  uint surface_id [[flat]];
   float clip_distance [[clip_distance]][4];
 };
 
 struct SurfaceFragmentInput {
   float4 position [[position]];
   float2 texture_position;
+  uint surface_id [[flat]];
 };
 
 vertex SurfaceVertexOutput surface_vertex(
@@ -886,10 +898,13 @@ vertex SurfaceVertexOutput surface_vertex(
   return SurfaceVertexOutput{
       device_position,
       texture_position,
+      surface_id,
       {clip_distance.x, clip_distance.y, clip_distance.z, clip_distance.w}};
 }
 
 fragment float4 surface_fragment(SurfaceFragmentInput input [[stage_in]],
+                                 constant SurfaceBounds *surfaces
+                                 [[buffer(SurfaceInputIndex_Surfaces)]],
                                  texture2d<float> y_texture
                                  [[texture(SurfaceInputIndex_YTexture)]],
                                  texture2d<float> cb_cr_texture
@@ -904,7 +919,9 @@ fragment float4 surface_fragment(SurfaceFragmentInput input [[stage_in]],
       y_texture.sample(texture_sampler, input.texture_position).r,
       cb_cr_texture.sample(texture_sampler, input.texture_position).rg, 1.0);
 
-  return ycbcrToRGBTransform * ycbcr;
+  float4 color = ycbcrToRGBTransform * ycbcr;
+  color.a *= mask_alpha(input.position.xy, surfaces[input.surface_id].content_mask);
+  return color;
 }
 
 float4 hsla_to_rgba(Hsla hsla) {
@@ -1362,7 +1379,8 @@ fragment float4 backdrop_blur_fragment(
   // The pass does not blend — it replaces the region — so the boundary is
   // mixed against the untouched backdrop below rather than by the blender.
   float coverage =
-      saturate(0.5 - distance / max(blur.edge_aa, 1e-3)) * blur.opacity;
+      saturate(0.5 - distance / max(blur.edge_aa, 1e-3)) * blur.opacity *
+      mask_alpha(input.position.xy, blur.content_mask);
   if (coverage <= 0.) {
     discard_fragment();
   }

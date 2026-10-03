@@ -1065,7 +1065,7 @@ fn fs_shadow(input: ShadowVarying) -> @location(0) vec4<f32> {
         alpha *= saturate(0.5 + element_distance);
     }
 
-    return blend_color(input.color, alpha);
+    return blend_color(input.color, alpha * mask_alpha(input.position.xy, shadow.content_mask));
 }
 
 // --- path rasterization --- //
@@ -1075,6 +1075,7 @@ struct PathRasterizationVertex {
     st_position: vec2<f32>,
     color: Background,
     bounds: Bounds,
+    content_mask: ContentMask,
 }
 
 
@@ -1121,6 +1122,9 @@ fn fs_path_rasterization(input: PathRasterizationVarying) -> @location(0) vec4<f
         let distance = f / length(gradient);
         alpha = saturate(0.5 - distance);
     }
+    // The path sprite pass may draw several paths as one union quad, so the
+    // rounded mask is applied here, per path.
+    alpha *= mask_alpha(input.position.xy, v.content_mask);
     let prepared_gradient = prepare_gradient_color(
         background.tag,
         background.color_space,
@@ -1214,7 +1218,7 @@ fn fs_underline(input: UnderlineVarying) -> @location(0) vec4<f32> {
     let underline = load_underline(input.underline_id);
     if (underline.wavy == 0u)
     {
-        return blend_color(input.color, input.color.a);
+        return blend_color(input.color, input.color.a * mask_alpha(input.position.xy, underline.content_mask));
     }
 
     let half_thickness = underline.thickness * 0.5;
@@ -1230,7 +1234,7 @@ fn fs_underline(input: UnderlineVarying) -> @location(0) vec4<f32> {
     let distance_from_top_border = distance_in_pixels - half_thickness;
     let distance_from_bottom_border = distance_in_pixels + half_thickness;
     let alpha = saturate(0.5 - max(-distance_from_bottom_border, distance_from_top_border));
-    return blend_color(input.color, alpha * input.color.a);
+    return blend_color(input.color, alpha * input.color.a * mask_alpha(input.position.xy, underline.content_mask));
 }
 
 // --- monochrome sprites --- //
@@ -1250,6 +1254,7 @@ struct MonoSpriteVarying {
     @builtin(position) position: vec4<f32>,
     @location(0) tile_position: vec2<f32>,
     @location(1) @interpolate(flat) color: vec4<f32>,
+    @location(2) @interpolate(flat) sprite_id: u32,
     @location(3) clip_distances: vec4<f32>,
 }
 
@@ -1263,6 +1268,7 @@ fn vs_mono_sprite(@builtin(vertex_index) vertex_id: u32, @builtin(instance_index
 
     out.tile_position = to_tile_position(unit_vertex, sprite.tile);
     out.color = hsla_to_rgba(sprite.color);
+    out.sprite_id = instance_id;
     out.clip_distances = distance_from_clip_rect_transformed(unit_vertex, sprite.bounds, sprite.content_mask.bounds, sprite.transformation);
     return out;
 }
@@ -1277,7 +1283,8 @@ fn fs_mono_sprite(input: MonoSpriteVarying) -> @location(0) vec4<f32> {
         return vec4<f32>(0.0);
     }
 
-    return blend_color(input.color, alpha_corrected);
+    let sprite = load_mono_sprite(input.sprite_id);
+    return blend_color(input.color, alpha_corrected * mask_alpha(input.position.xy, sprite.content_mask));
 }
 
 // --- polychrome sprites --- //
@@ -1330,16 +1337,15 @@ fn fs_poly_sprite(input: PolySpriteVarying) -> @location(0) vec4<f32> {
         let grayscale = dot(color.rgb, GRAYSCALE_FACTORS);
         color = vec4<f32>(vec3<f32>(grayscale), sample.a);
     }
-    return blend_color(color, sprite.opacity * saturate(0.5 - distance));
+    return blend_color(color, sprite.opacity * saturate(0.5 - distance) * mask_alpha(input.position.xy, sprite.content_mask));
 }
 
 // --- surfaces --- //
 
-// Fed by the renderer-local `SurfaceParams`, which carries a bare `PodBounds`
-// rather than a `ContentMask` — so no corners here.
+// Must match the renderer-local `SurfaceParams`.
 struct SurfaceParams {
     bounds: Bounds,
-    content_mask: Bounds,
+    content_mask: ContentMask,
 }
 
 @group(1) @binding(0) var<uniform> surface_locals: SurfaceParams;
@@ -1367,7 +1373,7 @@ fn vs_surface(@builtin(vertex_index) vertex_id: u32) -> SurfaceVarying {
     var out = SurfaceVarying();
     out.position = to_device_position(unit_vertex, surface_locals.bounds);
     out.texture_position = unit_vertex;
-    out.clip_distances = distance_from_clip_rect(unit_vertex, surface_locals.bounds, surface_locals.content_mask);
+    out.clip_distances = distance_from_clip_rect(unit_vertex, surface_locals.bounds, surface_locals.content_mask.bounds);
     return out;
 }
 
@@ -1383,7 +1389,7 @@ fn fs_surface(input: SurfaceVarying) -> @location(0) vec4<f32> {
         textureSampleLevel(t_cb_cr, s_surface, input.texture_position, 0.0).rg,
         1.0);
 
-    return ycbcr_to_RGB * y_cb_cr;
+    return blend_color(ycbcr_to_RGB * y_cb_cr, mask_alpha(input.position.xy, surface_locals.content_mask));
 }
 
 // --- BackdropBlur ------------------------------------------------------------
@@ -1460,7 +1466,8 @@ fn fs_backdrop_blur(input: BackdropBlurVarying) -> @location(0) vec4<f32> {
     let distance = quad_sdf(input.position.xy, blur.bounds, blur.corner_radii);
     // How much of this pixel the shape covers; the boundary is mixed against
     // the untouched backdrop below, since this pass replaces rather than blends.
-    let coverage = clamp(0.5 - distance / max(blur.edge_aa, 1e-3), 0.0, 1.0) * blur.opacity;
+    let coverage = clamp(0.5 - distance / max(blur.edge_aa, 1e-3), 0.0, 1.0) * blur.opacity
+        * mask_alpha(input.position.xy, blur.content_mask);
     if (coverage <= 0.0) {
         discard;
     }

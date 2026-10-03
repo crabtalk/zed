@@ -969,7 +969,7 @@ float4 shadow_fragment(ShadowFragmentInput input): SV_TARGET {
         alpha *= saturate(0.5 - element_distance);
     }
 
-    return input.color * float4(1., 1., 1., alpha);
+    return input.color * float4(1., 1., 1., alpha * mask_alpha(input.position.xy, shadow.content_mask));
 }
 
 /*
@@ -983,6 +983,7 @@ struct PathRasterizationSprite {
     float2 st_position;
     Background color;
     Bounds bounds;
+    ContentMask content_mask;
 };
 
 StructuredBuffer<PathRasterizationSprite> path_rasterization_sprites: register(t1);
@@ -1029,6 +1030,9 @@ float4 path_rasterization_fragment(PathFragmentInput input): SV_Target {
         float distance = f / length(gradient);
         alpha = saturate(0.5 - distance);
     }
+    // The path sprite pass may draw several paths as one union quad, so the
+    // rounded mask is applied here, per path.
+    alpha *= mask_alpha(input.position.xy, sprite.content_mask);
 
     GradientColor gradient = prepare_gradient_color(
         background.tag, background.color_space, background.solid, background.colors);
@@ -1144,9 +1148,9 @@ float4 underline_fragment(UnderlineFragmentInput input): SV_Target {
         float distance_from_bottom_border = distance_in_pixels + half_thickness;
         float alpha = saturate(
             0.5 - max(-distance_from_bottom_border, distance_from_top_border));
-        return input.color * float4(1., 1., 1., alpha);
+        return input.color * float4(1., 1., 1., alpha * mask_alpha(input.position.xy, underline.content_mask));
     } else {
-        return input.color;
+        return input.color * float4(1., 1., 1., mask_alpha(input.position.xy, underline.content_mask));
     }
 }
 
@@ -1170,6 +1174,7 @@ struct MonochromeSpriteVertexOutput {
     float4 position: SV_Position;
     float2 tile_position: POSITION;
     nointerpolation float4 color: COLOR;
+    nointerpolation uint sprite_id: TEXCOORD0;
     float4 clip_distance: SV_ClipDistance;
 };
 
@@ -1177,6 +1182,7 @@ struct MonochromeSpriteFragmentInput {
     float4 position: SV_Position;
     float2 tile_position: POSITION;
     nointerpolation float4 color: COLOR;
+    nointerpolation uint sprite_id: TEXCOORD0;
     float4 clip_distance: SV_ClipDistance;
 };
 
@@ -1196,6 +1202,7 @@ MonochromeSpriteVertexOutput monochrome_sprite_vertex(uint vertex_id: SV_VertexI
     output.position = device_position;
     output.tile_position = tile_position;
     output.color = color;
+    output.sprite_id = sprite_id;
     output.clip_distance = clip_distance;
     return output;
 }
@@ -1203,7 +1210,8 @@ MonochromeSpriteVertexOutput monochrome_sprite_vertex(uint vertex_id: SV_VertexI
 float4 monochrome_sprite_fragment(MonochromeSpriteFragmentInput input): SV_Target {
     float sample = t_sprite.Sample(s_sprite, input.tile_position).r;
     float alpha_corrected = apply_contrast_and_gamma_correction(sample, input.color.rgb, grayscale_enhanced_contrast, gamma_ratios);
-    return float4(input.color.rgb, input.color.a * alpha_corrected);
+    float mask = mask_alpha(input.position.xy, mono_sprites[input.sprite_id].content_mask);
+    return float4(input.color.rgb, input.color.a * alpha_corrected * mask);
 }
 
 MonochromeSpriteVertexOutput subpixel_sprite_vertex(uint vertex_id: SV_VertexID, uint instance_id: SV_InstanceID) {
@@ -1219,7 +1227,8 @@ SubpixelSpriteFragmentOutput subpixel_sprite_fragment(MonochromeSpriteFragmentIn
 
     SubpixelSpriteFragmentOutput output;
     output.foreground = float4(input.color.rgb, 1.0f);
-    output.alpha = float4(input.color.a * alpha_corrected, 1.0f);
+    float mask = mask_alpha(input.position.xy, mono_sprites[input.sprite_id].content_mask);
+    output.alpha = float4(input.color.a * alpha_corrected * mask, 1.0f);
     return output;
 }
 
@@ -1282,6 +1291,7 @@ float4 polychrome_sprite_fragment(PolychromeSpriteFragmentInput input): SV_Targe
         float3 grayscale = dot(color.rgb, GRAYSCALE_FACTORS);
         color = float4(grayscale, sample.a);
     }
-    color.a *= sprite.opacity * saturate(0.5 - distance);
+    color.a *= sprite.opacity * saturate(0.5 - distance) *
+               mask_alpha(input.position.xy, sprite.content_mask);
     return color;
 }

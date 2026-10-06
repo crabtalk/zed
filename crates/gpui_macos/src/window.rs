@@ -3561,7 +3561,12 @@ extern "C" fn accepts_first_mouse(this: &Object, _: Sel, _: id) -> BOOL {
 extern "C" fn opaque_rect_for_window_move_when_in_titlebar(this: &Object, _: Sel) -> NSRect {
     let zero_rect = NSRect::new(NSPoint::new(0., 0.), NSSize::new(0., 0.));
     let window_state = unsafe { get_window_state(this) };
-    let app_owns_titlebar_drag = window_state.as_ref().lock().app_owns_titlebar_drag;
+    let app_owns_titlebar_drag = {
+        let state = window_state.as_ref().lock();
+        // Native fullscreen shows the titlebar in an overlay that slides down
+        // with the menu bar; the content view claims none of it there.
+        state.app_owns_titlebar_drag && !state.is_fullscreen()
+    };
     if app_owns_titlebar_drag {
         unsafe { msg_send![this, bounds] }
     } else {

@@ -401,16 +401,14 @@ fn render_cat_numbered_code_block(
     // it, so there is nothing for the scroll viewport to scroll. Using `flex()`
     // on the scroll wrapper plus `flex_none()` on the inner item lets the inner
     // item take its natural width (the unwrapped code), which is what overflows.
-    // `restrict_scroll_to_axis` then keeps vertical wheel events flowing through
-    // to the outer thread scroller. This mirrors the standard markdown
-    // code-block path in `crates/markdown/src/markdown.rs`.
+    // This mirrors the standard markdown code-block path in
+    // `crates/markdown/src/markdown.rs`.
     let code_scroll = div()
         .id(code_scroll_id)
         .flex()
         .flex_1()
         .min_w_0()
         .overflow_x_scroll()
-        .restrict_scroll_to_axis()
         .child(div().flex_none().child(code_text));
 
     container

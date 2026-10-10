@@ -1519,6 +1519,10 @@ impl App {
                     // where DispatchTree::root_node_id asserts on empty nodes
                     let clear = window.draw(cx);
                     clear.clear(cx);
+                    // The macOS backend orders a new window front on its first
+                    // present, so it is never shown without a frame.
+                    #[cfg(target_os = "macos")]
+                    window.present();
 
                     cx.window_handles.insert(id, window.handle);
                     cx.windows.get_mut(id).unwrap().replace(Box::new(window));

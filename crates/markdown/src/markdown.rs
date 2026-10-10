@@ -2876,7 +2876,6 @@ impl Element for MarkdownElement {
                                                 code_block
                                                     .flex()
                                                     .overflow_x_scroll()
-                                                    .restrict_scroll_to_axis()
                                                     .track_scroll(scroll_handle)
                                             } else {
                                                 code_block.w_full()
@@ -3047,7 +3046,6 @@ impl Element for MarkdownElement {
                                     .border(px(1.5))
                                     .border_color(cx.theme().colors().border)
                                     .rounded_sm()
-                                    .restrict_scroll_to_axis()
                                     .custom_scrollbars(
                                         Scrollbars::new(ScrollAxes::Horizontal)
                                             .id(("markdown-table-scrollbar", range.start))
@@ -5387,7 +5385,6 @@ mod tests {
                     .w(px(300.))
                     .h(px(80.))
                     .overflow_y_scroll()
-                    .restrict_scroll_to_axis()
                     .child(self.0.clone())
             }
         }

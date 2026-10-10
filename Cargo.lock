@@ -7607,6 +7607,7 @@ dependencies = [
  "gpui_web",
  "gpui_wgpu",
  "gpui_windows",
+ "reqwest_client",
 ]
 
 [[package]]

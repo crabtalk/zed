@@ -953,6 +953,7 @@ mod tests {
                     },
                     is_held: false,
                     prefer_character_input,
+                    layout: None,
                 }),
                 cx,
             )

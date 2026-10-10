@@ -1,6 +1,6 @@
 use gpui::{
-    Capslock, KeyDownEvent, KeyUpEvent, Keystroke, Modifiers, ModifiersChangedEvent, MouseButton,
-    MouseDownEvent, MouseExitEvent, MouseMoveEvent, MousePressureEvent, MouseUpEvent,
+    Capslock, KeyDownEvent, KeyLayout, KeyUpEvent, Keystroke, Modifiers, ModifiersChangedEvent,
+    MouseButton, MouseDownEvent, MouseExitEvent, MouseMoveEvent, MousePressureEvent, MouseUpEvent,
     NavigationDirection, PinchEvent, Pixels, PlatformInput, PressureStage, ScrollDelta,
     ScrollWheelEvent, TouchPhase, point, px,
 };
@@ -128,14 +128,19 @@ pub(crate) unsafe fn platform_input_from_native(
                     },
                 }))
             }
-            NSEventType::NSKeyDown => Some(PlatformInput::KeyDown(KeyDownEvent {
-                keystroke: parse_keystroke(native_event),
-                is_held: native_event.isARepeat() == YES,
-                prefer_character_input: false,
-            })),
-            NSEventType::NSKeyUp => Some(PlatformInput::KeyUp(KeyUpEvent {
-                keystroke: parse_keystroke(native_event),
-            })),
+            NSEventType::NSKeyDown => {
+                let (keystroke, layout) = parse_keystroke(native_event);
+                Some(PlatformInput::KeyDown(KeyDownEvent {
+                    keystroke,
+                    is_held: native_event.isARepeat() == YES,
+                    prefer_character_input: false,
+                    layout,
+                }))
+            }
+            NSEventType::NSKeyUp => {
+                let (keystroke, layout) = parse_keystroke(native_event);
+                Some(PlatformInput::KeyUp(KeyUpEvent { keystroke, layout }))
+            }
             NSEventType::NSLeftMouseDown
             | NSEventType::NSRightMouseDown
             | NSEventType::NSOtherMouseDown => {
@@ -335,7 +340,7 @@ pub(crate) unsafe fn platform_input_from_native(
     }
 }
 
-unsafe fn parse_keystroke(native_event: id) -> Keystroke {
+unsafe fn parse_keystroke(native_event: id) -> (Keystroke, Option<KeyLayout>) {
     unsafe {
         use cocoa::appkit::*;
 
@@ -354,6 +359,10 @@ unsafe fn parse_keystroke(native_event: id) -> Keystroke {
         let function = modifiers.contains(NSEventModifierFlags::NSFunctionKeyMask)
             && first_char
                 .is_none_or(|ch| !(NSUpArrowFunctionKey..=NSModeSwitchFunctionKey).contains(&ch));
+        // Read before the text-key arm below folds a shifted key into `key`
+        // and clears the flag with it.
+        let shift_held = shift;
+        let mut layout = None;
 
         #[allow(non_upper_case_globals)]
         let key = match first_char {
@@ -434,6 +443,12 @@ unsafe fn parse_keystroke(native_event: id) -> Keystroke {
                     chars_for_modified_key(native_event.keyCode(), NO_MOD);
                 let mut chars_with_shift =
                     chars_for_modified_key(native_event.keyCode(), SHIFT_MOD);
+                layout = Some(KeyLayout {
+                    unshifted: chars_ignoring_modifiers.clone(),
+                    shifted: (chars_with_shift != chars_ignoring_modifiers)
+                        .then(|| chars_with_shift.clone()),
+                    shift: shift_held,
+                });
                 let always_use_cmd_layout = always_use_command_layout();
 
                 // Handle Dvorak+QWERTY / Russian / Armenian
@@ -482,17 +497,20 @@ unsafe fn parse_keystroke(native_event: id) -> Keystroke {
             }
         };
 
-        Keystroke {
-            modifiers: Modifiers {
-                control,
-                alt,
-                shift,
-                platform: command,
-                function,
+        (
+            Keystroke {
+                modifiers: Modifiers {
+                    control,
+                    alt,
+                    shift,
+                    platform: command,
+                    function,
+                },
+                key,
+                key_char,
             },
-            key,
-            key_char,
-        }
+            layout,
+        )
     }
 }
 

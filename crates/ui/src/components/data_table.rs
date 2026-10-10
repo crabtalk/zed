@@ -704,12 +704,10 @@ pub fn render_table_row(
 
         // Scrollable section: overflow_x_scroll + track_scroll so GPUI handles the visual
         // shift natively without requiring per-scroll re-renders of list items.
-        // restrict_scroll_to_axis lets vertical scroll events pass through to the list.
         let mut scrollable_section = div()
             .id(("table-row-scrollable", row_index as u64))
             .flex_grow_1()
             .overflow_x_scroll()
-            .restrict_scroll_to_axis()
             .flex()
             .child(render_section(Box::new(scrollable_cells.into_iter())));
 
@@ -824,7 +822,6 @@ pub fn render_table_header(
             .id("table-header-scrollable")
             .flex_grow_1()
             .overflow_x_scroll()
-            .restrict_scroll_to_axis()
             .flex()
             .child(inner);
 
@@ -1069,7 +1066,6 @@ fn render_resize_handles_resizable(
         .left(pinned_width)
         .right_0()
         .overflow_x_scroll()
-        .restrict_scroll_to_axis()
         .child(inner);
 
     if let Some(handle) = h_scroll_handle {
@@ -1309,7 +1305,6 @@ impl RenderOnce for Table {
                 let h_scroll_container = div()
                     .id("table-h-scroll")
                     .overflow_x_scroll()
-                    .restrict_scroll_to_axis()
                     .flex_grow_1()
                     .h_full()
                     .track_scroll(&state.read(cx).horizontal_scroll_handle)
@@ -1364,7 +1359,6 @@ impl RenderOnce for Table {
             }
 
             content
-                .restrict_scroll_to_axis()
                 .track_focus(&state.read(cx).focus_handle)
                 .id(("table", state.entity_id()))
                 .into_any_element()

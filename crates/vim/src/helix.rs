@@ -1994,6 +1994,7 @@ mod test {
                     keystroke,
                     is_held: false,
                     prefer_character_input: false,
+                    layout: None,
                 }),
                 cx,
             )

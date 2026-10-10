@@ -752,7 +752,7 @@ fn mermaid_scroll_container(
     scroll_handle: &ScrollHandle,
     on_zoom: Option<MermaidZoomCallback>,
 ) -> Stateful<Div> {
-    let mut container = div()
+    div()
         .id(ElementId::named_usize(
             "mermaid-diagram-body",
             source_offset,
@@ -760,15 +760,7 @@ fn mermaid_scroll_container(
         .w_full()
         .overflow_x_scroll()
         .track_scroll(scroll_handle)
-        .on_scroll_wheel(on_mermaid_zoom_scroll(markdown, source_offset, on_zoom));
-    // Without this, gpui maps vertical wheel deltas onto the x axis for
-    // x-only scroll containers (see `paint_scroll_listener` in gpui's div),
-    // hijacking plain vertical scrolls. Restricting to the actual axis lets
-    // vertical deltas propagate to the surrounding view, and means a
-    // ctrl+vertical-scroll (zoom gesture) never moves this container either,
-    // since its delta.x is zero.
-    container.style().restrict_scroll_to_axis = Some(true);
-    container
+        .on_scroll_wheel(on_mermaid_zoom_scroll(markdown, source_offset, on_zoom))
 }
 
 fn with_mermaid_horizontal_scrollbar(

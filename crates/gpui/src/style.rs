@@ -186,38 +186,17 @@ pub struct Style {
 
     // Overflow properties
     /// How children overflowing their container should affect layout
+    ///
+    /// A scroll wheel event only scrolls the axes set to `Overflow::Scroll`; input on another axis
+    /// is not remapped. Pixel-based scroll gestures are locked to their initially dominant axis.
+    /// The lock may be released when the gesture changes direction strongly. Touch phases delimit
+    /// gestures when available, with a timeout fallback for platforms that only emit moved events.
     #[refineable]
     pub overflow: Point<Overflow>,
     /// How much space (in points) should be reserved for the scrollbars of `Overflow::Scroll` and `Overflow::Auto` nodes.
     pub scrollbar_width: AbsoluteLength,
     /// Whether both x and y axis should be scrollable at the same time.
     pub allow_concurrent_scroll: bool,
-    /// Whether scrolling should be restricted to the input gesture's axis.
-    ///
-    /// Pixel-based scroll gestures are locked to their initially dominant axis. The lock may be
-    /// released when the gesture changes direction strongly. Touch phases delimit gestures when
-    /// available, with a timeout fallback for platforms that only emit moved events.
-    ///
-    /// This also prevents input from being remapped to another axis. For example, horizontal input
-    /// will not scroll a container that only has vertical overflow enabled. Mouse wheel platforms
-    /// typically report ordinary wheel input on the Y axis and Shift-modified input on the X axis.
-    ///
-    /// ## Motivation
-    ///
-    /// On the web when scrolling with the mouse wheel, scrolling up and down will always scroll the Y axis, even when
-    /// the mouse is over a horizontally-scrollable element.
-    ///
-    /// The only way to scroll horizontally is to hold down `Shift` while scrolling, which then changes the scroll axis
-    /// to the X axis.
-    ///
-    /// Currently, GPUI operates differently from the web in that it will scroll an element in either the X or Y axis
-    /// when scrolling with just the mouse wheel. This causes problems when scrolling in a vertical list that contains
-    /// horizontally-scrollable elements, as when you get to the horizontally-scrollable elements the scroll will be
-    /// hijacked.
-    ///
-    /// Ideally we would match the web's behavior and not have a need for this, but right now we're adding this opt-in
-    /// style property to limit the potential blast radius.
-    pub restrict_scroll_to_axis: bool,
 
     // Position properties
     /// What should the `position` value of this struct use as a base offset?
@@ -648,15 +627,17 @@ impl Style {
             _ => {
                 let mut min = bounds.origin;
                 let mut max = bounds.bottom_right();
+                let mut inset = Edges::default();
 
                 if self
                     .border_color
                     .is_some_and(|color| !color.is_transparent())
                 {
-                    min.x += self.border_widths.left.to_pixels(rem_size);
-                    max.x -= self.border_widths.right.to_pixels(rem_size);
-                    min.y += self.border_widths.top.to_pixels(rem_size);
-                    max.y -= self.border_widths.bottom.to_pixels(rem_size);
+                    inset = self.border_widths.to_pixels(rem_size);
+                    min.x += inset.left;
+                    max.x -= inset.right;
+                    min.y += inset.top;
+                    max.y -= inset.bottom;
                 }
 
                 let bounds = match (
@@ -679,7 +660,25 @@ impl Style {
                     (false, false) => Bounds::from_corners(min, max),
                 };
 
-                Some(ContentMask { bounds })
+                // The mask curves with the element that owns it, inset by its
+                // border — a child of a rounded box is concentric with it, not
+                // pasted onto it. `clamp_radii_for_quad_size` keeps a radius
+                // past half the box from reading every fragment as outside.
+                // A corner backs off by the wider of the two borders meeting
+                // there, so the inner curve never pokes through either one.
+                let outer = self.corner_radii.to_pixels(rem_size);
+                let corner_radii = Corners {
+                    top_left: (outer.top_left - inset.left.max(inset.top)).max(px(0.)),
+                    top_right: (outer.top_right - inset.right.max(inset.top)).max(px(0.)),
+                    bottom_right: (outer.bottom_right - inset.right.max(inset.bottom)).max(px(0.)),
+                    bottom_left: (outer.bottom_left - inset.left.max(inset.bottom)).max(px(0.)),
+                }
+                .clamp_radii_for_quad_size(bounds.size);
+
+                Some(ContentMask {
+                    bounds,
+                    corner_radii,
+                })
             }
         }
     }
@@ -778,7 +777,6 @@ impl Default for Style {
                 y: Overflow::Visible,
             },
             allow_concurrent_scroll: false,
-            restrict_scroll_to_axis: false,
             scrollbar_width: AbsoluteLength::default(),
             position: Position::Relative,
             inset: Edges::auto(),

@@ -35,6 +35,7 @@ pub struct WebPlatform {
     background_executor: BackgroundExecutor,
     foreground_executor: ForegroundExecutor,
     text_system: Arc<dyn PlatformTextSystem>,
+    canvas_font_fallback: CanvasFontFallback,
     active_window: Rc<RefCell<Option<AnyWindowHandle>>>,
     active_display: Rc<dyn PlatformDisplay>,
     callbacks: RefCell<WebPlatformCallbacks>,
@@ -143,6 +144,10 @@ struct WebPlatformCallbacks {
     thermal_state_change: Option<Box<dyn FnMut()>>,
 }
 
+/// The family `.SystemUIFont` resolves to unless
+/// [`WebPlatform::with_system_font`] names another.
+const DEFAULT_SYSTEM_FONT: &str = "IBM Plex Sans";
+
 impl WebPlatform {
     pub fn new(allow_multi_threading: bool) -> Self {
         Self::new_with_backend(allow_multi_threading, WebBackendPreference::Auto)
@@ -176,7 +181,10 @@ impl WebPlatform {
         ));
         let background_executor = BackgroundExecutor::new(dispatcher.clone());
         let foreground_executor = ForegroundExecutor::new(dispatcher.clone());
-        let text_system = Arc::new(WebTextSystem::new("IBM Plex Sans", canvas_font_fallback));
+        let text_system = Arc::new(WebTextSystem::new(
+            DEFAULT_SYSTEM_FONT,
+            canvas_font_fallback,
+        ));
         let text_system: Arc<dyn PlatformTextSystem> = text_system;
         let active_display: Rc<dyn PlatformDisplay> =
             Rc::new(WebDisplay::new(browser_window.clone()));
@@ -198,6 +206,7 @@ impl WebPlatform {
             background_executor,
             foreground_executor,
             text_system,
+            canvas_font_fallback,
             active_window: Rc::new(RefCell::new(None)),
             active_display,
             callbacks: RefCell::new(WebPlatformCallbacks::default()),
@@ -210,6 +219,17 @@ impl WebPlatform {
             gestures,
             _cursor_restore_listeners: cursor_restore_listeners,
         }
+    }
+
+    /// Names the family that `.SystemUIFont`, GPUI's default font, resolves
+    /// to. The browser offers no system fonts, so it should be one the
+    /// application adds; text in a family that resolves to nothing panics.
+    ///
+    /// Call before the platform is handed to an application: it replaces the
+    /// text system, and anything already added to the old one is gone.
+    pub fn with_system_font(mut self, family: &str) -> Self {
+        self.text_system = Arc::new(WebTextSystem::new(family, self.canvas_font_fallback));
+        self
     }
 
     /// Returns an HTTP client that runs browser Fetch operations on this platform's main thread.

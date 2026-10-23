@@ -1,0 +1,66 @@
+#!/usr/bin/env python3
+"""Generate the bezel-gpui-* crates from this checkout, uncommitted edits
+included, for a consumer to build against before anything is published.
+
+Usage: script/patch-bezel <out-dir> <version>
+
+<out-dir> becomes a detached worktree at HEAD with the working tree's changes
+applied, rewritten by `script/prepare-publish <version>`. <version> must meet
+the consumer's requirement (`0.3.19` for `bezel-gpui = "0.3.19"`).
+`<out-dir>/patch.toml` then patches every generated crate over crates.io:
+
+    cargo build --config <out-dir>/patch.toml
+
+Run it again after editing to regenerate. Remove the worktree with
+`git worktree remove --force <out-dir>`.
+"""
+
+import re
+import shutil
+import subprocess
+import sys
+from pathlib import Path
+
+
+def git(*args, cwd, **kwargs):
+    return subprocess.run(["git", *args], cwd=cwd, check=True, **kwargs)
+
+
+def main():
+    if len(sys.argv) != 3:
+        sys.exit(__doc__)
+    out = Path(sys.argv[1]).resolve()
+    version = sys.argv[2]
+    root = Path(git("rev-parse", "--show-toplevel", cwd=Path.cwd(),
+                    capture_output=True, text=True).stdout.strip())
+
+    if out.exists():
+        git("worktree", "remove", "--force", str(out), cwd=root)
+    git("worktree", "add", "--detach", str(out), "HEAD", cwd=root)
+
+    # Tracked edits as a patch, then untracked files copied as they are.
+    diff = git("diff", "HEAD", "--binary", cwd=root, capture_output=True).stdout
+    if diff:
+        git("apply", "--whitespace=nowarn", cwd=out, input=diff)
+    untracked = git("ls-files", "--others", "--exclude-standard", "-z", cwd=root,
+                    capture_output=True, text=True).stdout.split("\0")
+    for name in filter(None, untracked):
+        dest = out / name
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(root / name, dest)
+
+    subprocess.run([str(out / "script" / "prepare-publish"), version], cwd=out, check=True)
+
+    entries = []
+    for manifest in sorted(out.glob("crates/*/Cargo.toml")):
+        match = re.search(r'^name = "(bezel-[^"]+)"$', manifest.read_text(), flags=re.M)
+        if match:
+            entries.append(f'{match.group(1)} = {{ path = "{manifest.parent}" }}')
+    patch = out / "patch.toml"
+    patch.write_text("[patch.crates-io]\n" + "\n".join(entries) + "\n")
+    print(f"\n{len(entries)} crates patched by {patch}")
+    print(f"    cargo build --config {patch}")
+
+
+if __name__ == "__main__":
+    main()

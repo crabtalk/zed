@@ -1018,6 +1018,7 @@ pub struct InteractiveText {
         Option<Box<dyn Fn(&[Range<usize>], InteractiveTextClickEvent, &mut Window, &mut App)>>,
     hover_listener: Option<Box<dyn Fn(Option<usize>, MouseMoveEvent, &mut Window, &mut App)>>,
     tooltip_builder: Option<Rc<dyn Fn(usize, &mut Window, &mut App) -> Option<AnyView>>>,
+    tooltip_is_hoverable: bool,
     tooltip_id: Option<TooltipId>,
     clickable_ranges: Vec<Range<usize>>,
 }
@@ -1046,6 +1047,7 @@ impl InteractiveText {
             click_listener: None,
             hover_listener: None,
             tooltip_builder: None,
+            tooltip_is_hoverable: false,
             tooltip_id: None,
             clickable_ranges: Vec::new(),
         }
@@ -1086,6 +1088,19 @@ impl InteractiveText {
         builder: impl Fn(usize, &mut Window, &mut App) -> Option<AnyView> + 'static,
     ) -> Self {
         self.tooltip_builder = Some(Rc::new(builder));
+        self.tooltip_is_hoverable = false;
+        self
+    }
+
+    /// hoverable_tooltip lets you specify a tooltip for a given character index in the string.
+    /// The tooltip itself is also hoverable and won't disappear when the user moves the mouse into
+    /// the tooltip.
+    pub fn hoverable_tooltip(
+        mut self,
+        builder: impl Fn(usize, &mut Window, &mut App) -> Option<AnyView> + 'static,
+    ) -> Self {
+        self.tooltip_builder = Some(Rc::new(builder));
+        self.tooltip_is_hoverable = true;
         self
     }
 }
@@ -1246,7 +1261,7 @@ impl Element for InteractiveText {
                 if let Some(tooltip_builder) = self.tooltip_builder.clone() {
                     let active_tooltip = interactive_state.active_tooltip.clone();
                     let build_tooltip = Rc::new({
-                        let tooltip_is_hoverable = false;
+                        let tooltip_is_hoverable = self.tooltip_is_hoverable;
                         let text_layout = text_layout.clone();
                         move |window: &mut Window, cx: &mut App| {
                             text_layout

@@ -50,10 +50,7 @@ use anyhow::{Context as _, Result};
 use async_task::Runnable;
 use collections::FxHashMap;
 use futures::channel::oneshot;
-#[cfg(any(test, feature = "test-support", feature = "bench-support"))]
-use image::RgbaImage;
-use image::codecs::gif::GifDecoder;
-use image::{AnimationDecoder as _, DynamicImage, Frame};
+use image::{AnimationDecoder as _, DynamicImage, Frame, RgbaImage, codecs::gif::GifDecoder};
 use raw_window_handle::{HasDisplayHandle, HasWindowHandle};
 use scheduler::Instant;
 pub use scheduler::RunnableMeta;
@@ -61,19 +58,19 @@ use schemars::JsonSchema;
 use seahash::SeaHasher;
 use serde::{Deserialize, Serialize};
 use smallvec::SmallVec;
-use std::borrow::Cow;
-use std::collections::hash_map::Entry;
-use std::hash::{Hash, Hasher};
-use std::io::Cursor;
-use std::ops;
-use std::time::Duration;
 use std::{
+    borrow::Cow,
+    collections::hash_map::Entry,
     ffi::OsString,
     fmt::{self, Debug},
+    hash::{Hash, Hasher},
+    io::Cursor,
+    ops,
     ops::Range,
     path::{Path, PathBuf},
     rc::Rc,
     sync::Arc,
+    time::Duration,
 };
 use strum::EnumIter;
 use uuid::Uuid;
@@ -1403,6 +1400,15 @@ pub trait PlatformWindow: HasWindowHandle + HasDisplayHandle {
     #[cfg(any(test, feature = "test-support", feature = "bench-support"))]
     fn as_test(&mut self) -> Option<&mut TestWindow> {
         None
+    }
+
+    /// Renders a scene into a separate target at the requested pixel size.
+    fn render_scene_to_image(
+        &self,
+        _scene: &Scene,
+        _size: Size<DevicePixels>,
+    ) -> Result<RgbaImage> {
+        anyhow::bail!("offscreen image rendering is unavailable on this platform")
     }
 
     /// Renders the given scene to a texture and returns the pixel data as an RGBA image.

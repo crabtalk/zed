@@ -4,7 +4,6 @@ use crate::{
     kTISPropertyInputSourceIsASCIICapable, kTISPropertyInputSourceType, kTISTypeKeyboardInputMode,
     ns_string, renderer,
 };
-#[cfg(any(test, feature = "test-support"))]
 use anyhow::Result;
 use block2::RcBlock;
 use cocoa::{
@@ -33,12 +32,13 @@ use gpui::{
     SharedString, Size, SystemWindowTab, WindowAppearance, WindowBackgroundAppearance,
     WindowBounds, WindowControlArea, WindowKind, WindowParams, WindowVisibility, point, px, size,
 };
-#[cfg(any(test, feature = "test-support"))]
 use image::RgbaImage;
 
 use core_foundation::base::{CFRelease, CFTypeRef};
-use core_foundation_sys::base::CFEqual;
-use core_foundation_sys::number::{CFBooleanGetValue, CFBooleanRef};
+use core_foundation_sys::{
+    base::CFEqual,
+    number::{CFBooleanGetValue, CFBooleanRef},
+};
 use core_graphics::display::{CGDirectDisplayID, CGRect};
 use ctor::ctor;
 use futures::channel::oneshot;
@@ -2404,6 +2404,14 @@ impl PlatformWindow for MacWindow {
         NSBeep()
     }
 
+    fn render_scene_to_image(
+        &self,
+        scene: &gpui::Scene,
+        size: gpui::Size<gpui::DevicePixels>,
+    ) -> Result<RgbaImage> {
+        self.0.lock().renderer.render_scene_to_image(scene, size)
+    }
+
     #[cfg(any(test, feature = "test-support"))]
     fn render_to_image(&self, scene: &gpui::Scene) -> Result<RgbaImage> {
         let mut this = self.0.lock();
@@ -3922,7 +3930,8 @@ unsafe fn remove_layer_background(layer: id, blur_radius: f64) {
                     let core_image: BOOL = msg_send![blur, isKindOfClass: class!(CIFilter)];
                     if core_image == NO {
                         let yes: id = msg_send![class!(NSNumber), numberWithBool: YES];
-                        let _: () = msg_send![blur, setValue: yes forKey: ns_string("inputNormalizeEdges")];
+                        let _: () =
+                            msg_send![blur, setValue: yes forKey: ns_string("inputNormalizeEdges")];
                     }
                     let replaced: id = msg_send![filters, mutableCopy];
                     let _: () = msg_send![replaced, replaceObjectAtIndex: i withObject: blur];

@@ -541,7 +541,7 @@ impl ImageSource {
         window: &mut Window,
         cx: &mut App,
     ) -> Option<Result<Arc<RenderImage>, ImageCacheError>> {
-        match self {
+        let result = match self {
             ImageSource::Resource(resource) => {
                 if let Some(cache) = cache {
                     cache.load(resource, window, cx)
@@ -552,7 +552,15 @@ impl ImageSource {
             ImageSource::Custom(loading_fn) => loading_fn(window, cx),
             ImageSource::Render(data) => Some(Ok(data.to_owned())),
             ImageSource::Image(data) => window.use_asset::<AssetLogger<ImageDecoder>>(data, cx),
+        };
+        if let Some(capture) = &mut window.capture {
+            match &result {
+                None => capture.pending = true,
+                Some(Err(error)) => capture.error = Some(error.to_string()),
+                Some(Ok(_)) => {}
+            }
         }
+        result
     }
 
     pub(crate) fn get_data(

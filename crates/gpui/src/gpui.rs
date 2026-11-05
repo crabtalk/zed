@@ -31,6 +31,7 @@ mod inspector;
 mod interactive;
 mod key_dispatch;
 mod keymap;
+mod offscreen;
 mod path_builder;
 mod platform;
 pub mod prelude;
@@ -94,9 +95,7 @@ mod seal {
     pub trait Sealed {}
 }
 
-pub use accesskit;
-pub use accesskit::Action as AccessibleAction;
-pub use accesskit::{Orientation, Role, Toggled};
+pub use accesskit::{self, Action as AccessibleAction, Orientation, Role, Toggled};
 pub use action::*;
 pub use anyhow::Result;
 pub use app::*;

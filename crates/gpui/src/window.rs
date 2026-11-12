@@ -5,9 +5,6 @@ use crate::Inspector;
 #[cfg(feature = "profiler")]
 use crate::profiler;
 use crate::{
-    offscreen::Capture,
-    gestures::{GestureTuning, RecognizedTouchGesture, TouchGestureRecognizer},
-    interactive::TouchEvent,
     Action, AnyDrag, AnyElement, AnyImageCache, AnyTooltip, AnyView, App, AppContext, Arena, Asset,
     AsyncWindowContext, AtlasTile, AvailableSpace, BackdropBlur, Background, BorderStyle, Bounds,
     BoxShadow, Capslock, Context, Corners, CursorHideMode, CursorStyle, Decorations, DevicePixels,
@@ -25,7 +22,14 @@ use crate::{
     TextInputStateChange, TextRenderingMode, TextStyle, TextStyleRefinement, ThermalState,
     TransformationMatrix, Underline, UnderlineStyle, WindowAppearance, WindowBackgroundAppearance,
     WindowBounds, WindowControls, WindowDecorations, WindowOptions, WindowParams, WindowTextSystem,
-    WindowVisibility, point, prelude::*, px, rems, size, transparent_black,
+    WindowVisibility,
+    gestures::{GestureTuning, RecognizedTouchGesture, TouchGestureRecognizer},
+    interactive::TouchEvent,
+    offscreen::Capture,
+    point,
+    prelude::*,
+    px, rems, size, transparent_black,
+    view::ViewElementState,
 };
 
 use anyhow::{Context as _, Result, anyhow};
@@ -1104,6 +1108,44 @@ pub(crate) struct PaintIndex {
     accessed_element_states_index: usize,
     tab_handle_index: usize,
     line_layout_index: LineLayoutIndex,
+}
+
+impl PrepaintStateIndex {
+    pub(crate) fn rebase(&mut self, previous: &Self, next: &Self) {
+        self.hitboxes_index = next.hitboxes_index + (self.hitboxes_index - previous.hitboxes_index);
+        self.tooltips_index = next.tooltips_index + (self.tooltips_index - previous.tooltips_index);
+        self.deferred_draws_index =
+            next.deferred_draws_index + (self.deferred_draws_index - previous.deferred_draws_index);
+        self.dispatch_tree_index =
+            next.dispatch_tree_index + (self.dispatch_tree_index - previous.dispatch_tree_index);
+        self.accessed_element_states_index = next.accessed_element_states_index
+            + (self.accessed_element_states_index - previous.accessed_element_states_index);
+        self.line_layout_index
+            .rebase(&previous.line_layout_index, &next.line_layout_index);
+    }
+}
+
+impl PaintIndex {
+    pub(crate) fn rebase(&mut self, previous: &Self, next: &Self) {
+        #[cfg(any(test, feature = "test-support"))]
+        {
+            self.debug_bounds_index =
+                next.debug_bounds_index + (self.debug_bounds_index - previous.debug_bounds_index);
+        }
+        self.scene_index = next.scene_index + (self.scene_index - previous.scene_index);
+        self.mouse_listeners_index = next.mouse_listeners_index
+            + (self.mouse_listeners_index - previous.mouse_listeners_index);
+        self.input_handlers_index =
+            next.input_handlers_index + (self.input_handlers_index - previous.input_handlers_index);
+        self.cursor_styles_index =
+            next.cursor_styles_index + (self.cursor_styles_index - previous.cursor_styles_index);
+        self.accessed_element_states_index = next.accessed_element_states_index
+            + (self.accessed_element_states_index - previous.accessed_element_states_index);
+        self.tab_handle_index =
+            next.tab_handle_index + (self.tab_handle_index - previous.tab_handle_index);
+        self.line_layout_index
+            .rebase(&previous.line_layout_index, &next.line_layout_index);
+    }
 }
 
 impl Frame {
@@ -4122,7 +4164,54 @@ impl Window {
         }
     }
 
+    pub(crate) fn can_move_cached_view(
+        &self,
+        prepaint: &Range<PrepaintStateIndex>,
+        paint: &Range<PaintIndex>,
+        previous: Bounds<Pixels>,
+        previous_mask: ContentMask<Pixels>,
+        next: Bounds<Pixels>,
+        next_mask: ContentMask<Pixels>,
+    ) -> bool {
+        let delta = (next.origin - previous.origin).scale(self.scale_factor());
+        previous.size == next.size
+            && previous_mask.corner_radii == Corners::default()
+            && next_mask.corner_radii == Corners::default()
+            && previous_mask.bounds.intersect(&previous) == previous
+            && next_mask.bounds.intersect(&next) == next
+            && delta.x.0.fract() == 0.
+            && delta.y.0.fract() == 0.
+            && prepaint.start.hitboxes_index == prepaint.end.hitboxes_index
+            && prepaint.start.tooltips_index == prepaint.end.tooltips_index
+            && prepaint.start.deferred_draws_index == prepaint.end.deferred_draws_index
+            && paint.start.mouse_listeners_index == paint.end.mouse_listeners_index
+            && paint.start.input_handlers_index == paint.end.input_handlers_index
+            && paint.start.cursor_styles_index == paint.end.cursor_styles_index
+            && paint.start.tab_handle_index == paint.end.tab_handle_index
+            && self
+                .rendered_frame
+                .scene
+                .can_translate(paint.start.scene_index..paint.end.scene_index)
+    }
+
     pub(crate) fn reuse_prepaint(&mut self, range: Range<PrepaintStateIndex>) {
+        let next = self.prepaint_index();
+        let mut rebased = FxHashSet::default();
+        for key in &self.rendered_frame.accessed_element_states
+            [range.start.accessed_element_states_index..range.end.accessed_element_states_index]
+        {
+            if key.1 == TypeId::of::<ViewElementState>() && rebased.insert(key) {
+                if let Some(state) = self
+                    .rendered_frame
+                    .element_states
+                    .get_mut(key)
+                    .and_then(|state| state.inner.downcast_mut::<Option<ViewElementState>>())
+                    .and_then(Option::as_mut)
+                {
+                    state.rebase_prepaint(&range.start, &next);
+                }
+            }
+        }
         self.next_frame.hitboxes.extend(
             self.rendered_frame.hitboxes[range.start.hitboxes_index..range.end.hitboxes_index]
                 .iter()
@@ -4188,13 +4277,40 @@ impl Window {
     }
 
     pub(crate) fn reuse_paint(&mut self, range: Range<PaintIndex>) {
+        self.reuse_paint_translated(range, Point::default());
+    }
+
+    pub(crate) fn reuse_paint_translated(
+        &mut self,
+        range: Range<PaintIndex>,
+        offset: Point<Pixels>,
+    ) {
+        let next = self.paint_index();
+        let mut rebased = FxHashSet::default();
+        for key in &self.rendered_frame.accessed_element_states
+            [range.start.accessed_element_states_index..range.end.accessed_element_states_index]
+        {
+            if key.1 == TypeId::of::<ViewElementState>() && rebased.insert(key) {
+                if let Some(state) = self
+                    .rendered_frame
+                    .element_states
+                    .get_mut(key)
+                    .and_then(|state| state.inner.downcast_mut::<Option<ViewElementState>>())
+                    .and_then(Option::as_mut)
+                {
+                    state.rebase_paint(&range.start, &next, offset);
+                }
+            }
+        }
         // Cached elements still exist in the frame even when their paint methods don't run.
         #[cfg(any(test, feature = "test-support"))]
         for (selector, bounds) in &self.rendered_frame.debug_bounds_records
             [range.start.debug_bounds_index..range.end.debug_bounds_index]
         {
-            self.next_frame
-                .record_debug_bounds(selector.clone(), *bounds);
+            self.next_frame.record_debug_bounds(
+                selector.clone(),
+                Bounds::new(bounds.origin + offset, bounds.size),
+            );
         }
         self.next_frame.cursor_styles.extend(
             self.rendered_frame.cursor_styles
@@ -4227,9 +4343,10 @@ impl Window {
 
         self.text_system
             .reuse_layouts(range.start.line_layout_index..range.end.line_layout_index);
-        self.next_frame.scene.replay(
+        self.next_frame.scene.replay_translated(
             range.start.scene_index..range.end.scene_index,
             &self.rendered_frame.scene,
+            offset.scale(self.scale_factor()),
         );
     }
 
@@ -4362,6 +4479,7 @@ impl Window {
     /// `fade.band` at each active edge. Granularity is per-primitive (each
     /// quad/glyph/sprite takes the ramp value at its own position), which
     /// reads as a smooth gradient for text and small marks.
+    /// Apply the same scope during prepaint and paint when it contains cached views.
     pub fn with_edge_fade<R>(
         &mut self,
         fade: Option<EdgeFade>,
@@ -8315,9 +8433,9 @@ mod tests {
     #[cfg(feature = "profiler")]
     #[gpui::test]
     fn test_frame_requests_and_skips_are_journaled(cx: &mut TestAppContext) {
-        use crate::FrameRequestSource;
-        use crate::profiler::journal::{
-            self, ForegroundJournalEntry, FrameSkipReason, IntervalBoundary,
+        use crate::{
+            FrameRequestSource,
+            profiler::journal::{self, ForegroundJournalEntry, FrameSkipReason, IntervalBoundary},
         };
         use scheduler::Instant;
 

@@ -180,11 +180,49 @@ impl Scene {
     }
 
     pub fn replay(&mut self, range: Range<usize>, prev_scene: &Scene) {
+        self.replay_translated(range, prev_scene, Point::default());
+    }
+
+    pub(crate) fn can_translate(&self, range: Range<usize>) -> bool {
+        self.paint_operations[range]
+            .iter()
+            .all(|operation| match operation {
+                PaintOperation::Primitive(primitive) => match primitive {
+                    Primitive::Quad(_)
+                    | Primitive::Underline(_)
+                    | Primitive::PolychromeSprite(_) => true,
+                    Primitive::MonochromeSprite(sprite) => {
+                        sprite.transformation == TransformationMatrix::unit()
+                    }
+                    Primitive::SubpixelSprite(sprite) => {
+                        sprite.transformation == TransformationMatrix::unit()
+                    }
+                    _ => false,
+                },
+                PaintOperation::StartLayer(_) | PaintOperation::EndLayer => true,
+                PaintOperation::BackdropBlur(_) => false,
+            })
+    }
+
+    pub(crate) fn replay_translated(
+        &mut self,
+        range: Range<usize>,
+        prev_scene: &Scene,
+        offset: Point<ScaledPixels>,
+    ) {
         for operation in &prev_scene.paint_operations[range] {
             match operation {
-                PaintOperation::Primitive(primitive) => self.insert_primitive(primitive.clone()),
+                PaintOperation::Primitive(primitive) => {
+                    let mut primitive = primitive.clone();
+                    if offset != Point::default() {
+                        primitive.translate(offset);
+                    }
+                    self.insert_primitive(primitive);
+                }
                 PaintOperation::BackdropBlur(blur) => self.insert_backdrop_blur(*blur),
-                PaintOperation::StartLayer(bounds) => self.push_layer(*bounds),
+                PaintOperation::StartLayer(bounds) => {
+                    self.push_layer(Bounds::new(bounds.origin + offset, bounds.size))
+                }
                 PaintOperation::EndLayer => self.pop_layer(),
             }
         }
@@ -276,6 +314,19 @@ pub enum Primitive {
 
 #[expect(missing_docs)]
 impl Primitive {
+    fn translate(&mut self, offset: Point<ScaledPixels>) {
+        let (bounds, mask) = match self {
+            Self::Quad(value) => (&mut value.bounds, &mut value.content_mask),
+            Self::Underline(value) => (&mut value.bounds, &mut value.content_mask),
+            Self::MonochromeSprite(value) => (&mut value.bounds, &mut value.content_mask),
+            Self::SubpixelSprite(value) => (&mut value.bounds, &mut value.content_mask),
+            Self::PolychromeSprite(value) => (&mut value.bounds, &mut value.content_mask),
+            _ => unreachable!("primitive cannot be translated"),
+        };
+        bounds.origin += offset;
+        mask.bounds.origin += offset;
+    }
+
     pub fn bounds(&self) -> &Bounds<ScaledPixels> {
         match self {
             Primitive::Shadow(shadow) => &shadow.bounds,

@@ -7,13 +7,12 @@ use crate::{
     renderer,
 };
 use anyhow::{Context as _, Result, ensure};
-use core_graphics::geometry::CGSize;
-use foreign_types::ForeignType;
 use gpui::{self, Bounds, DrawOrder, Pixels, Point, Scene};
 use objc2::{DeclaredClass, MainThreadMarker, Message, rc::Retained};
 use objc2_app_kit::NSView;
+use objc2_core_foundation::CGSize;
 use objc2_foundation::{NSArray, NSPoint, NSRect, NSSize};
-use objc2_quartz_core::{CALayer, CATransaction};
+use objc2_quartz_core::{CAMetalLayer, CATransaction};
 use raw_window_handle::RawWindowHandle;
 use std::{ptr, rc::Rc};
 
@@ -23,7 +22,7 @@ mod view;
 
 struct Overlay {
     view: Retained<CompositionView>,
-    layer: metal::MetalLayer,
+    layer: Retained<CAMetalLayer>,
 }
 
 pub(crate) struct Compositor {
@@ -49,7 +48,7 @@ struct Frame<'a> {
     scene: &'a Scene,
     scale: f32,
     mtm: MainThreadMarker,
-    base: &'a metal::MetalLayerRef,
+    base: &'a CAMetalLayer,
     views: Vec<usize>,
     materials: Vec<usize>,
     overlays: usize,
@@ -151,8 +150,8 @@ impl Compositor {
         let base = renderer
             .layer()
             .context("native composition requires a window renderer")?
-            .to_owned();
-        let previous_transaction = base.presents_with_transaction();
+            .retain();
+        let previous_transaction = base.presentsWithTransaction();
         CATransaction::begin();
         CATransaction::setDisableActions(true);
         renderer.set_presents_with_transaction(true);
@@ -320,7 +319,7 @@ impl Compositor {
         let end = end.map_or(std::ops::Bound::Unbounded, std::ops::Bound::Excluded);
         let orders = (std::ops::Bound::Included(start), end);
         if std::mem::take(base_pending) {
-            return renderer.draw_layer(scene, base, orders, !base.is_opaque());
+            return renderer.draw_layer(scene, base, orders, !base.isOpaque());
         }
         if scene.batches_in(orders).next().is_none() {
             return Ok(());
@@ -331,7 +330,7 @@ impl Compositor {
             let layer = renderer.create_layer();
             let view = CompositionView::new(mtm);
             // SAFETY: metal-rs and objc2 wrap the same CALayer object.
-            view.setLayer(Some(unsafe { &*layer.as_ptr().cast::<CALayer>() }));
+            view.setLayer(Some(&layer));
             self.overlays.push(Overlay { view, layer });
         }
         let overlay = &self.overlays[index];
@@ -343,7 +342,7 @@ impl Compositor {
         if let Some(layer) = overlay.view.layer() {
             layer.setContentsScale(scale as f64);
         }
-        overlay.layer.set_drawable_size(CGSize::new(
+        overlay.layer.setDrawableSize(CGSize::new(
             size.width * scale as f64,
             size.height * scale as f64,
         ));

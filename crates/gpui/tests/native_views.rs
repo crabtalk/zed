@@ -52,7 +52,7 @@ fn quad() -> Quad {
 #[test]
 fn a_native_view_splits_an_enclosing_gpu_layer() {
     let mut scene = Scene::default();
-    scene.push_layer(bounds());
+    scene.push_layer();
     scene.insert_primitive(quad());
     scene.insert_native_view(native(Rc::new(ViewHandle)));
     scene.insert_primitive(quad());

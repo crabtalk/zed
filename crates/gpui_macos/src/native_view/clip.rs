@@ -84,12 +84,7 @@ impl CompositionView {
         let hook = self.ivars().borrow().material.clone();
         if let Some((state, changed)) = hook {
             let appearance = self.effectiveAppearance();
-            // SAFETY: both bindings name the same retained NSAppearance object.
-            let appearance = unsafe {
-                window_appearance::window_appearance_from_native(
-                    ptr::from_ref(&*appearance).cast_mut().cast(),
-                )
-            };
+            let appearance = window_appearance::window_appearance_from_native(Some(&appearance));
             if state.set_appearance(appearance) {
                 changed();
             }

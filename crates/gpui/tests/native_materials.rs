@@ -51,7 +51,7 @@ fn nested_scopes_partition_foreground_and_replay_with_new_orders(cx: &mut TestAp
         };
         let mut previous = Scene::default();
         previous.insert_primitive(quad);
-        previous.push_layer(glass.bounds);
+        previous.push_layer();
         previous.begin_native_material(group);
         previous.insert_primitive(quad);
         previous.begin_native_material(glass);
@@ -64,6 +64,15 @@ fn nested_scopes_partition_foreground_and_replay_with_new_orders(cx: &mut TestAp
         previous.finish();
         let mut replay = Scene::default();
         replay.insert_primitive(quad);
+        replay.insert_primitive(gpui::Underline {
+            order: 0,
+            pad: 0,
+            bounds: quad.bounds,
+            content_mask: quad.content_mask,
+            color: gpui::rgb(0xffffff).into(),
+            thickness: gpui::ScaledPixels(1.),
+            wavy: false.into(),
+        });
         replay.replay(0..previous.len(), &previous);
         replay.finish();
         let group = &replay.native_materials[0];

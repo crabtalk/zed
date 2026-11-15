@@ -1,11 +1,11 @@
-use cocoa::base::id;
 use gpui::WindowAppearance;
 use objc2_app_kit::{self as app_kit, NSAppearance};
 use objc2_foundation::NSArray;
 
-pub(crate) unsafe fn window_appearance_from_native(appearance: id) -> WindowAppearance {
-    // SAFETY: the caller supplies a live NSAppearance on the main thread.
-    let appearance = unsafe { &*appearance.cast::<NSAppearance>() };
+pub(crate) fn window_appearance_from_native(appearance: Option<&NSAppearance>) -> WindowAppearance {
+    let Some(appearance) = appearance else {
+        return WindowAppearance::Light;
+    };
     // SAFETY: AppKit's exported names are immutable process-lifetime objects.
     let names = unsafe {
         [
@@ -21,10 +21,4 @@ pub(crate) unsafe fn window_appearance_from_native(appearance: id) -> WindowAppe
         Some(name) if *name == *names[3] => WindowAppearance::Dark,
         _ => WindowAppearance::Light,
     }
-}
-
-#[link(name = "AppKit", kind = "framework")]
-unsafe extern "C" {
-    pub static NSAppearanceNameAqua: id;
-    pub static NSAppearanceNameDarkAqua: id;
 }

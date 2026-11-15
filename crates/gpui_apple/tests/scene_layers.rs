@@ -2,8 +2,8 @@
 
 use anyhow::Result;
 use gpui::{
-    self, AtlasKey, BackdropBlur, Bounds, ContentMask, DrawOrder, Hsla, ImageId, PathBuilder,
-    PlatformAtlas, PolychromeSprite, Quad, RenderImageParams, ScaledPixels, Scene,
+    self, AtlasKey, BackdropBlur, Bounds, ContentMask, DrawOrder, Hsla, ImageId, PaintedPath,
+    PathBuilder, PlatformAtlas, PolychromeSprite, Quad, RenderImageParams, ScaledPixels, Scene,
     native_material::{MaterialState, MaterialStyle, NativeMaterial},
 };
 use gpui_apple::metal_renderer::MetalRenderer;
@@ -27,7 +27,7 @@ fn quad(order: DrawOrder, x: f32, color: Hsla) -> Quad {
 
 #[test]
 fn transparent_layers_preserve_original_instance_offsets() -> Result<()> {
-    let mut renderer = MetalRenderer::new_headless(Default::default());
+    let mut renderer = MetalRenderer::new_headless(Default::default())?;
     let mut scene = Scene::default();
     scene.quads.extend([
         quad(0, 0., gpui::rgb(0xff0000).into()),
@@ -49,7 +49,7 @@ fn transparent_layers_preserve_original_instance_offsets() -> Result<()> {
 
 #[test]
 fn empty_layers_clear_previous_output_and_resize() -> Result<()> {
-    let mut renderer = MetalRenderer::new_headless(Default::default());
+    let mut renderer = MetalRenderer::new_headless(Default::default())?;
     let mut scene = Scene::default();
     scene.quads.push(quad(5, 0., gpui::rgb(0xffffff).into()));
     scene.finish();
@@ -69,8 +69,8 @@ fn empty_layers_clear_previous_output_and_resize() -> Result<()> {
 }
 
 #[test]
-fn path_layers_keep_original_path_ids() -> Result<()> {
-    let mut renderer = MetalRenderer::new_headless(Default::default());
+fn path_layers_keep_original_tile_offsets() -> Result<()> {
+    let mut renderer = MetalRenderer::new_headless(Default::default())?;
     let mut scene = Scene::default();
     for (order, x, color) in [(0, 0., 0xff0000), (1, 8., 0x00ff00)] {
         let mut builder = PathBuilder::fill();
@@ -79,19 +79,40 @@ fn path_layers_keep_original_path_ids() -> Result<()> {
         builder.line_to(gpui::point(gpui::px(x + 8.), gpui::px(8.)));
         builder.line_to(gpui::point(gpui::px(x), gpui::px(8.)));
         builder.close();
-        let mut path = builder.build()?.scale(1.);
-        path.color = gpui::rgb(color).into();
-        path.content_mask = ContentMask::new(path.bounds);
-        scene.insert_primitive(path);
-        if let Some(path) = scene.paths.last_mut() {
-            path.order = order;
+        let mask = ContentMask::new(Bounds::new(
+            gpui::point(gpui::px(0.), gpui::px(0.)),
+            gpui::size(gpui::px(16.), gpui::px(8.)),
+        ));
+        if order == 1 {
+            scene.begin_native_material(NativeMaterial {
+                id: Default::default(),
+                state: MaterialState::default(),
+                style: MaterialStyle::Group {
+                    spacing: gpui::px(0.),
+                },
+                bounds: mask.bounds.scale(1.),
+                content_mask: mask.scale(1.),
+                opacity: 1.,
+                order: 0,
+                end_order: 0,
+                parent: None,
+            });
+        }
+        scene.insert_primitive(PaintedPath::new(
+            builder.build()?,
+            1.,
+            mask,
+            gpui::rgb(color).into(),
+        ));
+        if order == 1 {
+            scene.end_native_material();
         }
     }
     scene.finish();
     let upper = renderer.render_scene_layer_to_image(
         &scene,
         gpui::size(16.into(), 8.into()),
-        1..2,
+        scene.native_materials[0].order..scene.native_materials[0].end_order,
         true,
     )?;
     assert_eq!(upper.get_pixel(4, 4).0, [0, 0, 0, 0]);
@@ -101,7 +122,7 @@ fn path_layers_keep_original_path_ids() -> Result<()> {
 
 #[test]
 fn backdrop_operations_respect_layer_boundaries_and_trailing_order() -> Result<()> {
-    let mut renderer = MetalRenderer::new_headless(Default::default());
+    let mut renderer = MetalRenderer::new_headless(Default::default())?;
     let mut scene = Scene::default();
     scene.quads.extend([
         quad(0, 0., gpui::rgb(0xff0000).into()),
@@ -152,7 +173,7 @@ fn backdrop_operations_respect_layer_boundaries_and_trailing_order() -> Result<(
 
 #[test]
 fn sprite_layers_share_the_atlas_and_keep_original_indices() -> Result<()> {
-    let mut renderer = MetalRenderer::new_headless(Default::default());
+    let mut renderer = MetalRenderer::new_headless(Default::default())?;
     let tile = renderer
         .sprite_atlas()
         .get_or_insert_with(
@@ -207,7 +228,7 @@ fn sprite_layers_share_the_atlas_and_keep_original_indices() -> Result<()> {
 
 #[test]
 fn full_scene_and_inclusive_ranges_keep_the_last_draw_order() -> Result<()> {
-    let mut renderer = MetalRenderer::new_headless(Default::default());
+    let mut renderer = MetalRenderer::new_headless(Default::default())?;
     let mut scene = Scene::default();
     scene
         .quads
@@ -227,7 +248,7 @@ fn full_scene_and_inclusive_ranges_keep_the_last_draw_order() -> Result<()> {
 
 #[test]
 fn native_materials_require_separate_export_but_allow_foreground_layer_readback() -> Result<()> {
-    let mut renderer = MetalRenderer::new_headless(Default::default());
+    let mut renderer = MetalRenderer::new_headless(Default::default())?;
     let foreground = quad(0, 0., gpui::rgb(0xff0000).into());
     let mut scene = Scene::default();
     scene.begin_native_material(NativeMaterial {

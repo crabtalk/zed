@@ -1976,10 +1976,12 @@ pub struct SurfaceBounds {
     pub content_mask: ContentMask<ScaledPixels>,
 }
 
+#[cfg(any(feature = "test-support", feature = "bench-support"))]
 pub struct MetalHeadlessRenderer {
     renderer: MetalRenderer,
 }
 
+#[cfg(any(feature = "test-support", feature = "bench-support"))]
 impl MetalHeadlessRenderer {
     pub fn new() -> Result<Self> {
         let instance_buffer_pool = Arc::new(Mutex::new(InstanceBufferPool::default()));
@@ -1988,6 +1990,7 @@ impl MetalHeadlessRenderer {
     }
 }
 
+#[cfg(any(feature = "test-support", feature = "bench-support"))]
 impl gpui::PlatformHeadlessRenderer for MetalHeadlessRenderer {
     fn render_scene_to_image(
         &mut self,

@@ -3,6 +3,7 @@
 
 Run on a `release` branch freshly cut from `dev`; the branch is generated output,
 never rebased. Usage: script/prepare-publish <version> [--dry-run]
+Verify the result with script/publish-gpui before publishing.
 """
 
 import json
@@ -11,9 +12,11 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 ROOTS = ("gpui", "gpui_platform", "gpui_web")
+WGPU_SOURCE = "git+https://github.com/gfx-rs/wgpu?"
 PREFIX = "bezel"
 FORK = "https://github.com/crabtalk/zed"
 UPSTREAM = "https://github.com/zed-industries/zed"
@@ -37,6 +40,8 @@ def published(name):
     Two namespaces, disjoint by construction: zed carries both `util` and
     `gpui_util`, which collide under any single-prefix rule.
     """
+    if name in ("wgpu", "naga") or name.startswith(("wgpu-", "naga-")):
+        return f"{PREFIX}-{name}"
     if name == "gpui":
         return f"{PREFIX}-gpui"
     if name.startswith("gpui_"):
@@ -169,7 +174,7 @@ def strip_dev_deps(text):
     out, skipping = [], False
     for line in text.splitlines(keepends=True):
         if line.startswith("["):
-            skipping = bool(re.match(r"^\[(target\.[^\]]*\.)?dev-dependencies\]", line))
+            skipping = bool(re.match(r"^\[(target\.[^\]]*\.)?dev-dependencies(?:\.[^\]]+)?\]", line))
         if not skipping:
             out.append(line)
     return "".join(out)
@@ -184,9 +189,13 @@ SUBSTITUTE = {"proptest": 'version = "1", features = ["attr-macro"]'}
 def versionless_git_deps(root_text):
     """Workspace deps declared by git with no version — cargo refuses to publish
     a manifest that references one, even optionally."""
-    return {m.group(1) for m in re.finditer(r"^([A-Za-z0-9_-]+) = \{([^}]*)\}$",
-                                            root_text, flags=re.M)
-            if "git = " in m.group(2) and "version = " not in m.group(2)} - set(SUBSTITUTE)
+    section = re.search(r"^\[workspace.dependencies\]\n(.*?)(?=^\[|\Z)",
+                        root_text, flags=re.M | re.S)
+    if section is None:
+        return set()
+    return {match.group(1) for match in re.finditer(
+        r"^([A-Za-z0-9_-]+) = \{([^}]*)\}", section.group(1), flags=re.M)
+        if "git = " in match.group(2) and "version = " not in match.group(2)} - set(SUBSTITUTE)
 
 
 def drop_versionless(text, name, versionless):
@@ -224,8 +233,118 @@ See [`bezel-gpui`](https://crates.io/crates/bezel-gpui) for the fork's entry poi
 """
 
 
+def wgpu_version(package, revision):
+    return package["version"] + "-bezel.r" + revision
+
+
+def rewrite_wgpu(text, name, packages, revision):
+    text = strip_dev_deps(text)
+    version = wgpu_version(packages[name], revision)
+    text = re.sub(r'^name = "[^"]*"$', f'name = "{published(name)}"', text,
+                  count=1, flags=re.M)
+    text = re.sub(r'^version = "[^"]*"$', f'version = "{version}"', text,
+                  count=1, flags=re.M)
+    text = re.sub(r'^readme = .*$', 'readme = "README.md"', text,
+                  count=1, flags=re.M)
+
+    def dependency(match):
+        header, dependency_name, body = match.groups()
+        if dependency_name not in packages:
+            if re.search(r'^path = ', body, flags=re.M):
+                sys.exit(f"{name}: dependency {dependency_name} escapes WGPU closure")
+            return match.group(0)
+        dependency_version = wgpu_version(packages[dependency_name], revision)
+        body = re.sub(r'^(version|path|package) = .*\n', "", body, flags=re.M)
+        return (f'{header}\npackage = "{published(dependency_name)}"\n'
+                f'version = "={dependency_version}"\n'
+                f'path = "../{dependency_name}"\n{body}')
+
+    return re.sub(r'(\[(?:target\.[^\n]*\.)?(?:build-)?dependencies\.([^]\n]+)\])\n'
+                  r'(.*?)(?=^\[|\Z)', dependency, text, flags=re.M | re.S)
+
+
+def vendor_wgpu(root, packages, dry):
+    if not packages:
+        return {}
+    revisions = {package["source"].rsplit("#", 1)[1] for package in packages.values()}
+    if len(revisions) != 1:
+        sys.exit("WGPU packages must resolve to one revision")
+    revision = revisions.pop()
+    destinations = {name: root / "vendor" / "wgpu" / name / "Cargo.toml"
+                    for name in packages}
+    if any(manifest.parent.exists() for manifest in destinations.values()):
+        sys.exit("vendor/wgpu already exists; prepare from an unprepared checkout")
+    print(f"  vendor {len(packages)} WGPU packages from {revision}")
+    if dry:
+        return destinations
+
+    with tempfile.TemporaryDirectory(prefix="bezel-wgpu-") as directory:
+        temporary = Path(directory)
+        (temporary / "src").mkdir()
+        (temporary / "src" / "lib.rs").touch()
+        (temporary / "Cargo.toml").write_text(
+            '[package]\nname = "bezel-wgpu-vendor"\nversion = "0.0.0"\n'
+            'edition = "2024"\n[dependencies]\n'
+            f'wgpu = {{ git = "https://github.com/gfx-rs/wgpu", rev = "{revision}", '
+            'features = ["webgl", "vulkan", "metal", "gles", "dx12"] }\n'
+            f'naga = {{ git = "https://github.com/gfx-rs/wgpu", rev = "{revision}" }}\n')
+        subprocess.run(["cargo", "vendor", "--versioned-dirs", "--manifest-path",
+                        str(temporary / "Cargo.toml"), str(temporary / "vendor")],
+                       check=True, stdout=subprocess.DEVNULL)
+        for name, package in sorted(packages.items()):
+            source = temporary / "vendor" / f'{name}-{package["version"]}'
+            destination = destinations[name].parent
+            shutil.copytree(source, destination)
+            (destination / ".cargo-checksum.json").unlink(missing_ok=True)
+            manifest = destination / "Cargo.toml"
+            manifest.write_text(rewrite_wgpu(manifest.read_text(), name, packages, revision))
+            upstream = Path(package["manifest_path"]).parent
+            readme = upstream / "README.md"
+            if name == "wgpu":
+                readme = upstream.parent / "README.md"
+            body = readme.read_text() if readme.exists() else f"# {name}\n"
+            (destination / "README.md").write_text(
+                f"> **NOTICE**\n> Modified distribution of `{name}` from "
+                f'[gfx-rs/wgpu](https://github.com/gfx-rs/wgpu/tree/{revision}), '
+                f'published as `bezel-{name}`.\n\n{body}')
+    return destinations
+
+
+def attach_wgpu(text, root, packages, manifests):
+    for name, manifest in sorted(manifests.items()):
+        revision = packages[name]["source"].rsplit("#", 1)[1]
+        version = wgpu_version(packages[name], revision)
+        path = manifest.parent.relative_to(root).as_posix()
+
+        def dependency(match):
+            body = re.sub(r'(?:git|rev|branch|tag|version|package|path) = "[^"]*",?\s*',
+                          "", match.group(1)).strip().rstrip(",")
+            return (f'{name} = {{ package = "{published(name)}", version = "={version}", '
+                    f'path = "{path}"' + (f", {body}" if body else "") + ' }')
+
+        text = re.sub(rf'^{re.escape(name)} = \{{([^}}]*)\}}$', dependency,
+                      text, flags=re.M)
+        text = text.replace("members = [\n", f'members = [\n    "{path}",\n', 1)
+    return text
+
+
+def unpublished_dependencies(crates, versionless):
+    errors = []
+    for name, manifest in crates.items():
+        text = rewrite_member(manifest.read_text(), name, "0.0.0", versionless)
+        for dependency in sorted(versionless):
+            if re.search(rf'^{re.escape(dependency)}(?:\.workspace\s*=|\s*=)',
+                         text, flags=re.M):
+                errors.append(f"{name}: {dependency}")
+        for match in re.finditer(r"^([A-Za-z0-9_-]+) = \{([^}]*)\}", text, flags=re.M):
+            body = match.group(2)
+            if "git = " in body and "version = " not in body:
+                errors.append(f"{name}: {match.group(1)}")
+    return errors
+
+
 def closure(root):
-    """Workspace members reachable from ROOTS across every target and feature.
+    """Workspace and pinned WGPU crates reachable across every target and feature.
 
     A published manifest names every optional dependency, so each one must be
     published too, whether or not any feature in this workspace enables it.
@@ -252,11 +371,19 @@ def closure(root):
         for n in meta["resolve"]["nodes"]
     }
 
+    external = {}
     seen, stack = set(), [i for i in members if by_id[i]["name"] in ROOTS]
+    if not stack:
+        sys.exit("no unprepared GPUI roots; prepare from a fresh checkout")
     while stack:
         pkg = stack.pop()
-        if pkg in seen or pkg not in members:
+        if pkg in seen:
             continue
+        package = by_id[pkg]
+        if pkg not in members:
+            if not (package.get("source") or "").startswith(WGPU_SOURCE):
+                continue
+            external[package["name"]] = package
         seen.add(pkg)
         stack.extend(deps.get(pkg, []))
 
@@ -273,8 +400,8 @@ def closure(root):
     edges = {by_id[i]["name"]: [by_id[d]["name"] for d in deps[i] if d in seen]
              for i in seen}
     outside = sorted({by_id[i]["name"] for i in members} - {by_id[i]["name"] for i in seen})
-    return ({by_id[i]["name"]: Path(by_id[i]["manifest_path"]) for i in seen},
-            edges, outside)
+    return ({by_id[i]["name"]: Path(by_id[i]["manifest_path"])
+             for i in seen if i in members}, edges, outside, external)
 
 
 def publish_order(edges):
@@ -390,8 +517,13 @@ def main():
                           capture_output=True, text=True, check=True).stdout.strip()
     version = f"{args[0].split('+')[0]}+zed.{base}"
 
-    crates, edges, outside = closure(root)
-    versionless = versionless_git_deps((root / 'Cargo.toml').read_text())
+    crates, edges, outside, external = closure(root)
+    root_text = (root / "Cargo.toml").read_text()
+    versionless = versionless_git_deps(root_text) - set(external)
+    errors = unpublished_dependencies(crates, versionless)
+    if errors:
+        sys.exit("dependencies have no publishable registry version:\n  " + "\n  ".join(errors))
+    vendored = vendor_wgpu(root, external, dry)
     print(f"{len(crates)} crates -> {PREFIX}-* @ {version}\n")
 
     for name, manifest in sorted(crates.items()):
@@ -409,6 +541,7 @@ def main():
 
     root_manifest = root / "Cargo.toml"
     new_root = rewrite_root(root_manifest.read_text(), sorted(crates), version, outside)
+    new_root = attach_wgpu(new_root, root, external, vendored)
     if not dry:
         root_manifest.write_text(new_root)
 

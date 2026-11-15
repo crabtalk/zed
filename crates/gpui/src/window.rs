@@ -25,6 +25,8 @@ use crate::{
     WindowVisibility,
     gestures::{GestureTuning, RecognizedTouchGesture, TouchGestureRecognizer},
     interactive::TouchEvent,
+    native_material::{MaterialState, MaterialStyle, NativeMaterial},
+    native_view::{NativeCapabilities, NativeView},
     offscreen::Capture,
     point,
     prelude::*,
@@ -1267,6 +1269,10 @@ impl Frame {
             }
         }
 
+        for view in &mut self.scene.native_views {
+            view.focused = view.focus.is_some() && view.focus == self.focus;
+            view.update_occlusions(&self.hitboxes);
+        }
         self.scene.finish();
     }
 }
@@ -1283,6 +1289,8 @@ pub struct Window {
     pub(crate) handle: AnyWindowHandle,
     pub(crate) invalidator: WindowInvalidator,
     pub(crate) removed: bool,
+    /// Backend capabilities initialized when the window opens.
+    pub native_surfaces: NativeCapabilities,
     pub(crate) platform_window: Box<dyn PlatformWindow>,
     pub(crate) display_id: Option<DisplayId>,
     pub(crate) display_observers: SubscriberSet<(), AnyObserver>,
@@ -2230,6 +2238,7 @@ impl Window {
             handle,
             invalidator,
             removed: false,
+            native_surfaces: platform_window.native_surfaces(),
             platform_window,
             display_id,
             display_observers: SubscriberSet::new(),
@@ -2563,7 +2572,42 @@ impl Window {
 
     /// Move focus to the element associated with the given [`FocusHandle`].
     pub fn focus(&mut self, handle: &FocusHandle, cx: &mut App) {
-        if !self.focus_enabled || self.focus == Some(handle.id) {
+        if !self.focus_enabled {
+            return;
+        }
+        let native = self
+            .rendered_frame
+            .scene
+            .native_views
+            .iter()
+            .find(|view| {
+                view.focus == Some(handle.id)
+                    && view.interactive
+                    && view.opacity > 0.
+                    && view.state.enabled.get()
+            })
+            .map(|view| view.state.clone());
+        for view in &self.rendered_frame.scene.native_views {
+            if view
+                .state
+                .window
+                .get()
+                .is_none_or(|owner| owner == self.handle.window_id())
+                && native
+                    .as_ref()
+                    .is_none_or(|state| !Rc::ptr_eq(state, &view.state))
+            {
+                view.state
+                    .request_focus(false, Some(self.handle.window_id()));
+            }
+        }
+        if let Some(state) = native {
+            state.request_focus(true, Some(self.handle.window_id()));
+            self.refresh();
+        } else {
+            self.platform_window.focus();
+        }
+        if self.focus == Some(handle.id) {
             return;
         }
 
@@ -2582,6 +2626,18 @@ impl Window {
             return;
         }
 
+        for view in &self.rendered_frame.scene.native_views {
+            if view
+                .state
+                .window
+                .get()
+                .is_none_or(|owner| owner == self.handle.window_id())
+            {
+                view.state
+                    .request_focus(false, Some(self.handle.window_id()));
+            }
+        }
+        self.platform_window.focus();
         if self.focus.is_some() {
             self.focus_generation = self.focus_generation.wrapping_add(1);
         }
@@ -5680,6 +5736,62 @@ impl Window {
             content_mask,
             image_buffer,
         });
+    }
+
+    /// The view keeps a fixed logical viewport while `bounds` sets its displayed
+    /// size. `hitbox` must belong to this frame; later hitboxes occlude native input.
+    pub fn paint_native_view(
+        &mut self,
+        mut view: NativeView,
+        bounds: Bounds<Pixels>,
+        focus: Option<&FocusHandle>,
+        hitbox: &Hitbox,
+    ) -> Result<()> {
+        self.invalidator.debug_assert_paint();
+        anyhow::ensure!(
+            self.native_surfaces.views,
+            "native view composition is unavailable"
+        );
+        view.focus = focus.map(|focus| focus.id);
+        view.window = Some(self.handle.window_id());
+        view.bounds = self.snap_bounds(bounds);
+        view.content_mask = self.snapped_content_mask();
+        view.opacity = self.element_opacity_for_bounds(&bounds);
+        view.hitbox = Some(hitbox.id);
+        self.next_frame.scene.insert_native_view(view);
+        Ok(())
+    }
+
+    /// Paints foreground inside a native material's content host.
+    pub fn paint_native_material<R>(
+        &mut self,
+        id: &GlobalElementId,
+        state: &MaterialState,
+        style: MaterialStyle,
+        bounds: Bounds<Pixels>,
+        paint: impl FnOnce(&mut Self) -> R,
+    ) -> Result<R> {
+        self.invalidator.debug_assert_paint();
+        anyhow::ensure!(
+            self.native_surfaces.materials,
+            "native materials are unavailable"
+        );
+        self.next_frame.scene.begin_native_material(NativeMaterial {
+            id: id.clone(),
+            state: state.clone(),
+            style,
+            bounds: self.snap_bounds(bounds),
+            content_mask: self.snapped_content_mask(),
+            opacity: self.element_opacity,
+            order: 0,
+            end_order: 0,
+            parent: None,
+        });
+        let opacity = std::mem::replace(&mut self.element_opacity, 1.);
+        let result = paint(self);
+        self.element_opacity = opacity;
+        self.next_frame.scene.end_native_material();
+        Ok(result)
     }
 
     /// Removes an image from the sprite atlas.

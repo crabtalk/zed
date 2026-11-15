@@ -42,7 +42,7 @@ use crate::{
     LineLayout, MissingGlyphSink, Pixels, PlatformGestures, PlatformInput, Point, Priority,
     RenderGlyphParams, RenderImage, RenderImageParams, RenderSvgParams, Scene, ShapedGlyph,
     ShapedRun, SharedString, Size, SvgRenderer, SystemWindowTab, Task, Window, WindowControlArea,
-    hash, point, px, size,
+    hash, native_view::NativeCapabilities, point, px, size,
 };
 #[cfg(any(target_os = "linux", target_os = "freebsd"))]
 use anyhow::bail;
@@ -1234,6 +1234,8 @@ pub trait PlatformWindow: HasWindowHandle + HasDisplayHandle {
         answers: &[PromptButton],
     ) -> Option<oneshot::Receiver<usize>>;
     fn activate(&self);
+    /// Return keyboard input from an embedded native view to GPUI.
+    fn focus(&self) {}
     /// Requests that the operating system draw attention to this window.
     fn request_attention(&self) {}
     fn is_active(&self) -> bool;
@@ -1272,6 +1274,10 @@ pub trait PlatformWindow: HasWindowHandle + HasDisplayHandle {
     fn on_close(&self, callback: Box<dyn FnOnce()>);
     fn on_appearance_changed(&self, callback: Box<dyn FnMut()>);
     fn on_button_layout_changed(&self, _callback: Box<dyn FnMut()>) {}
+    /// Native views and material content scopes available in this backend.
+    fn native_surfaces(&self) -> NativeCapabilities {
+        NativeCapabilities::default()
+    }
     fn draw(&self, scene: &Scene);
     /// How long the GPU has spent on this window's frames since it opened.
     /// `None` where the renderer cannot measure it, which is every backend but

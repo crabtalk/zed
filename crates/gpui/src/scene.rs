@@ -6,12 +6,13 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     AtlasTextureId, AtlasTile, Background, Bounds, ContentMask, Corners, Edges, Hsla, Pixels,
-    Point, Radians, ScaledPixels, Size, bounds_tree::BoundsTree, point,
+    Point, Radians, ScaledPixels, Size, bounds_tree::BoundsTree, native_material::NativeMaterial,
+    native_view::NativeView, point,
 };
 use std::{
     fmt::Debug,
     iter::Peekable,
-    ops::{Add, Range, Sub},
+    ops::{Add, Bound, Range, RangeBounds, Sub},
     slice,
 };
 
@@ -42,6 +43,11 @@ pub struct Scene {
     pub(crate) paint_operations: Vec<PaintOperation>,
     primitive_bounds: BoundsTree<ScaledPixels>,
     layer_stack: Vec<DrawOrder>,
+    order_base: DrawOrder,
+    last_order: DrawOrder,
+    pub native_views: Vec<NativeView>,
+    pub native_materials: Vec<NativeMaterial>,
+    native_material_stack: Vec<usize>,
     pub shadows: Vec<Shadow>,
     pub quads: Vec<Quad>,
     pub paths: Vec<Path<ScaledPixels>>,
@@ -62,6 +68,11 @@ impl Scene {
         self.paint_operations.clear();
         self.primitive_bounds.clear();
         self.layer_stack.clear();
+        self.order_base = 0;
+        self.last_order = 0;
+        self.native_views.clear();
+        self.native_materials.clear();
+        self.native_material_stack.clear();
         self.paths.clear();
         self.shadows.clear();
         self.quads.clear();
@@ -115,11 +126,13 @@ impl Scene {
         if clipped_bounds.is_empty() {
             return;
         }
-        blur.order = self
-            .layer_stack
-            .last()
-            .copied()
-            .unwrap_or_else(|| self.primitive_bounds.insert(clipped_bounds));
+        blur.order = self.order_base
+            + self
+                .layer_stack
+                .last()
+                .copied()
+                .unwrap_or_else(|| self.primitive_bounds.insert(clipped_bounds));
+        self.last_order = self.last_order.max(blur.order);
         self.backdrop_blurs.push(blur);
         self.paint_operations
             .push(PaintOperation::BackdropBlur(blur));
@@ -135,11 +148,13 @@ impl Scene {
             return;
         }
 
-        let order = self
-            .layer_stack
-            .last()
-            .copied()
-            .unwrap_or_else(|| self.primitive_bounds.insert(clipped_bounds));
+        let order = self.order_base
+            + self
+                .layer_stack
+                .last()
+                .copied()
+                .unwrap_or_else(|| self.primitive_bounds.insert(clipped_bounds));
+        self.last_order = self.last_order.max(order);
         match &mut primitive {
             Primitive::Shadow(shadow) => {
                 shadow.order = order;
@@ -179,6 +194,43 @@ impl Scene {
             .push(PaintOperation::Primitive(primitive));
     }
 
+    pub fn insert_native_view(&mut self, mut view: NativeView) {
+        if view.bounds.intersect(&view.content_mask.bounds).is_empty() {
+            return;
+        }
+        view.parent = self.native_material_stack.last().copied();
+        view.order = self.last_order + 1;
+        self.last_order = view.order;
+        self.order_base = view.order + 1;
+        self.native_views.push(view.clone());
+        self.paint_operations.push(PaintOperation::NativeView(view));
+    }
+
+    pub fn begin_native_material(&mut self, mut material: NativeMaterial) {
+        material.order = self.last_order + 1;
+        material.end_order = material.order;
+        material.parent = self.native_material_stack.last().copied();
+        self.last_order = material.order;
+        self.order_base = material.order + 1;
+        self.native_material_stack.push(self.native_materials.len());
+        self.native_materials.push(material.clone());
+        self.paint_operations
+            .push(PaintOperation::BeginNativeMaterial(material));
+    }
+
+    pub fn end_native_material(&mut self) {
+        let index = self
+            .native_material_stack
+            .pop()
+            .expect("unbalanced native material scope");
+        let order = self.last_order + 1;
+        self.native_materials[index].end_order = order;
+        self.last_order = order;
+        self.order_base = order + 1;
+        self.paint_operations
+            .push(PaintOperation::EndNativeMaterial);
+    }
+
     pub fn replay(&mut self, range: Range<usize>, prev_scene: &Scene) {
         self.replay_translated(range, prev_scene, Point::default());
     }
@@ -200,7 +252,10 @@ impl Scene {
                     _ => false,
                 },
                 PaintOperation::StartLayer(_) | PaintOperation::EndLayer => true,
-                PaintOperation::BackdropBlur(_) => false,
+                PaintOperation::BackdropBlur(_)
+                | PaintOperation::NativeView(_)
+                | PaintOperation::BeginNativeMaterial(_)
+                | PaintOperation::EndNativeMaterial => false,
             })
     }
 
@@ -220,6 +275,11 @@ impl Scene {
                     self.insert_primitive(primitive);
                 }
                 PaintOperation::BackdropBlur(blur) => self.insert_backdrop_blur(*blur),
+                PaintOperation::NativeView(view) => self.insert_native_view(view.clone()),
+                PaintOperation::BeginNativeMaterial(material) => {
+                    self.begin_native_material(material.clone())
+                }
+                PaintOperation::EndNativeMaterial => self.end_native_material(),
                 PaintOperation::StartLayer(bounds) => {
                     self.push_layer(Bounds::new(bounds.origin + offset, bounds.size))
                 }
@@ -251,23 +311,58 @@ impl Scene {
         allow(dead_code)
     )]
     pub fn batches(&self) -> impl Iterator<Item = PrimitiveBatch> + '_ {
+        self.batches_in(..)
+    }
+
+    /// Primitive indices refer to the original scene, including when a range
+    /// cuts through a batch. Call after `finish`.
+    pub fn batches_in(
+        &self,
+        orders: impl RangeBounds<DrawOrder>,
+    ) -> impl Iterator<Item = PrimitiveBatch> + '_ {
+        macro_rules! selected {
+            ($field:ident) => {{
+                let values = &self.$field;
+                let start = values.partition_point(|value| match orders.start_bound() {
+                    Bound::Included(start) => value.order < *start,
+                    Bound::Excluded(start) => value.order <= *start,
+                    Bound::Unbounded => false,
+                });
+                let end = start
+                    + values[start..].partition_point(|value| match orders.end_bound() {
+                        Bound::Included(end) => value.order <= *end,
+                        Bound::Excluded(end) => value.order < *end,
+                        Bound::Unbounded => true,
+                    });
+                (start, values[start..end].iter().peekable())
+            }};
+        }
+        let (shadows_start, shadows_iter) = selected!(shadows);
+        let (quads_start, quads_iter) = selected!(quads);
+        let (paths_start, paths_iter) = selected!(paths);
+        let (underlines_start, underlines_iter) = selected!(underlines);
+        let (monochrome_sprites_start, monochrome_sprites_iter) = selected!(monochrome_sprites);
+        let (subpixel_sprites_start, subpixel_sprites_iter) = selected!(subpixel_sprites);
+        let (polychrome_sprites_start, polychrome_sprites_iter) = selected!(polychrome_sprites);
+        let (surfaces_start, surfaces_iter) = selected!(surfaces);
         BatchIterator {
-            shadows_start: 0,
-            shadows_iter: self.shadows.iter().peekable(),
-            quads_start: 0,
-            quads_iter: self.quads.iter().peekable(),
-            paths_start: 0,
-            paths_iter: self.paths.iter().peekable(),
-            underlines_start: 0,
-            underlines_iter: self.underlines.iter().peekable(),
-            monochrome_sprites_start: 0,
-            monochrome_sprites_iter: self.monochrome_sprites.iter().peekable(),
-            subpixel_sprites_start: 0,
-            subpixel_sprites_iter: self.subpixel_sprites.iter().peekable(),
-            polychrome_sprites_start: 0,
-            polychrome_sprites_iter: self.polychrome_sprites.iter().peekable(),
-            surfaces_start: 0,
-            surfaces_iter: self.surfaces.iter().peekable(),
+            shadows_start,
+            shadows_iter,
+            quads_start,
+            quads_iter,
+            paths_start,
+            paths_iter,
+            underlines_start,
+            underlines_iter,
+            monochrome_sprites_start,
+            monochrome_sprites_iter,
+            subpixel_sprites_start,
+            subpixel_sprites_iter,
+            polychrome_sprites_start,
+            polychrome_sprites_iter,
+            surfaces_start,
+            surfaces_iter,
+            backdrop_blurs: self.backdrop_blurs.iter().peekable(),
         }
     }
 }
@@ -295,6 +390,9 @@ pub(crate) enum PrimitiveKind {
 pub(crate) enum PaintOperation {
     Primitive(Primitive),
     BackdropBlur(BackdropBlur),
+    NativeView(NativeView),
+    BeginNativeMaterial(NativeMaterial),
+    EndNativeMaterial,
     StartLayer(Bounds<ScaledPixels>),
     EndLayer,
 }
@@ -362,6 +460,7 @@ impl Primitive {
     allow(dead_code)
 )]
 struct BatchIterator<'a> {
+    backdrop_blurs: Peekable<slice::Iter<'a, BackdropBlur>>,
     shadows_start: usize,
     shadows_iter: Peekable<slice::Iter<'a, Shadow>>,
     quads_start: usize,
@@ -412,15 +511,24 @@ impl<'a> Iterator for BatchIterator<'a> {
                 PrimitiveKind::Surface,
             ),
         ];
-        orders_and_kinds.sort_by_key(|(order, kind)| (order.unwrap_or(u32::MAX), *kind));
+        orders_and_kinds.sort_by_key(|(order, kind)| (order.is_none(), *order, *kind));
 
         let first = orders_and_kinds[0];
         let second = orders_and_kinds[1];
-        let (batch_kind, max_order_and_kind) = if first.0.is_some() {
+        let (batch_kind, mut max_order_and_kind) = if first.0.is_some() {
             (first.1, (second.0.unwrap_or(u32::MAX), second.1))
         } else {
             return None;
         };
+
+        while self
+            .backdrop_blurs
+            .next_if(|blur| Some(blur.order) <= first.0)
+            .is_some()
+        {}
+        if let Some(blur) = self.backdrop_blurs.peek() {
+            max_order_and_kind = max_order_and_kind.min((blur.order, PrimitiveKind::Shadow));
+        }
 
         match batch_kind {
             PrimitiveKind::Shadow => {

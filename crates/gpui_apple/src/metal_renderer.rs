@@ -2,36 +2,30 @@ use crate::metal_atlas::MetalAtlas;
 use anyhow::{Context as _, Result};
 use block2::RcBlock;
 use core_graphics::geometry::CGSize;
+use foreign_types::{ForeignType, ForeignTypeRef};
 use gpui::{
-    AtlasTextureId, Background, Bounds, ContentMask, DevicePixels, PaintSurface, Path, Point,
-    PrimitiveBatch, ScaledPixels, Scene, Size, point, size,
+    self, AtlasTextureId, Background, Bounds, ContentMask, DevicePixels, DrawOrder, PaintSurface,
+    Path, Point, PrimitiveBatch, ScaledPixels, Scene, Size,
 };
 use image::RgbaImage;
-use objc2::{class, msg_send, rc::Retained, runtime::AnyObject};
-
-use foreign_types::{ForeignType, ForeignTypeRef};
 use metal::{
     CAMetalLayer, CommandQueue, MTLGPUFamily, MTLPixelFormat, MTLResourceOptions, NSRange,
     NSUInteger,
 };
+use objc2::{class, msg_send, rc::Retained, runtime::AnyObject};
 use objc2_core_foundation::CFRetained;
 use objc2_core_video::{
     CVMetalTexture, CVMetalTextureCache, CVMetalTextureGetTexture, CVPixelBufferGetHeight,
     CVPixelBufferGetHeightOfPlane, CVPixelBufferGetPixelFormatType, CVPixelBufferGetWidth,
     CVPixelBufferGetWidthOfPlane, kCVPixelFormatType_420YpCbCr8BiPlanarFullRange, kCVReturnSuccess,
 };
-
-#[link(name = "MetalPerformanceShaders", kind = "framework")]
-unsafe extern "C" {}
-
 use parking_lot::Mutex;
-
 use std::{
     cell::Cell,
     ffi::c_void,
     mem,
     mem::MaybeUninit,
-    ops::Range,
+    ops::{Range, RangeBounds},
     ptr, slice,
     sync::{
         Arc,
@@ -39,6 +33,9 @@ use std::{
     },
     time::Duration,
 };
+
+#[link(name = "MetalPerformanceShaders", kind = "framework")]
+unsafe extern "C" {}
 
 // Exported to metal
 pub(crate) type PointF = gpui::Point<f32>;
@@ -303,12 +300,12 @@ impl MetalRenderer {
         let is_apple_gpu = device.supports_family(MTLGPUFamily::Apple1);
 
         let unit_vertices = [
-            to_float2_bits(point(0., 0.)),
-            to_float2_bits(point(1., 0.)),
-            to_float2_bits(point(0., 1.)),
-            to_float2_bits(point(0., 1.)),
-            to_float2_bits(point(1., 0.)),
-            to_float2_bits(point(1., 1.)),
+            to_float2_bits(gpui::point(0., 0.)),
+            to_float2_bits(gpui::point(1., 0.)),
+            to_float2_bits(gpui::point(0., 1.)),
+            to_float2_bits(gpui::point(0., 1.)),
+            to_float2_bits(gpui::point(1., 0.)),
+            to_float2_bits(gpui::point(1., 1.)),
         ];
         let unit_vertices = device.new_buffer_with_data(
             unit_vertices.as_ptr() as *const c_void,
@@ -541,29 +538,56 @@ impl MetalRenderer {
                 return;
             }
         };
-        let viewport_size = layer.drawable_size();
-        let viewport_size: Size<DevicePixels> = size(
-            (viewport_size.width.ceil() as i32).into(),
-            (viewport_size.height.ceil() as i32).into(),
+        if let Err(error) = self.draw_layer(scene, &layer, .., !self.opaque) {
+            log::error!("failed to render: {error:#}");
+        }
+    }
+
+    /// The layer shares this renderer's device, atlas and pipelines.
+    pub fn create_layer(&self) -> metal::MetalLayer {
+        let layer = metal::MetalLayer::new();
+        Self::configure_layer(&layer, &self.device, true);
+        layer
+    }
+
+    /// `layer` must come from this renderer. The caller owns its size and
+    /// placement. Transparent layers clear uncovered pixels to zero alpha.
+    pub fn draw_layer(
+        &mut self,
+        scene: &Scene,
+        layer: &metal::MetalLayerRef,
+        orders: impl RangeBounds<DrawOrder>,
+        transparent: bool,
+    ) -> Result<()> {
+        layer.set_presents_with_transaction(self.presents_with_transaction);
+        let viewport = layer.drawable_size();
+        let viewport_size: Size<DevicePixels> = gpui::size(
+            (viewport.width.ceil() as i32).into(),
+            (viewport.height.ceil() as i32).into(),
         );
-        let drawable = if let Some(drawable) = layer.next_drawable() {
-            drawable
-        } else {
-            log::error!(
-                "failed to retrieve next drawable, drawable size: {:?}",
-                viewport_size
-            );
-            return;
-        };
-
-        let command_buffer = match self.render_frame(scene, drawable.texture(), viewport_size) {
-            Ok(command_buffer) => command_buffer,
-            Err(error) => {
-                log::error!("failed to render: {error:#}");
-                return;
-            }
-        };
-
+        if viewport_size.width.0 <= 0 || viewport_size.height.0 <= 0 {
+            anyhow::bail!("invalid layer size: {viewport_size:?}");
+        }
+        let drawable = layer
+            .next_drawable()
+            .context("failed to retrieve next drawable")?;
+        if self
+            .path_intermediate_texture
+            .as_ref()
+            .is_none_or(|texture| {
+                texture.width() != viewport_size.width.0 as u64
+                    || texture.height() != viewport_size.height.0 as u64
+            })
+        {
+            self.update_path_intermediate_textures(viewport_size);
+        }
+        let command_buffer = self.render_frame(
+            scene,
+            drawable.texture(),
+            viewport_size,
+            orders,
+            !transparent,
+        )?;
         if self.presents_with_transaction {
             command_buffer.commit();
             command_buffer.wait_until_scheduled();
@@ -572,6 +596,7 @@ impl MetalRenderer {
             command_buffer.present_drawable(drawable);
             command_buffer.commit();
         }
+        Ok(())
     }
 
     fn render_frame(
@@ -579,6 +604,8 @@ impl MetalRenderer {
         scene: &Scene,
         texture: &metal::TextureRef,
         viewport_size: Size<DevicePixels>,
+        orders: impl RangeBounds<DrawOrder>,
+        opaque: bool,
     ) -> Result<metal::CommandBuffer> {
         let mut writer = InstanceBufferWriter::new(
             &self.device,
@@ -603,6 +630,8 @@ impl MetalRenderer {
             &mut writer,
             texture,
             viewport_size,
+            orders,
+            opaque,
         )?;
 
         let instance_buffer_pool = self.instance_buffer_pool.clone();
@@ -654,12 +683,16 @@ impl MetalRenderer {
     /// use `render_scene_to_image()` instead.
     #[cfg(any(test, feature = "test-support"))]
     pub fn render_to_image(&mut self, scene: &Scene) -> Result<RgbaImage> {
+        anyhow::ensure!(
+            scene.native_views.is_empty() && scene.native_materials.is_empty(),
+            "native views require a separate pixel acquisition path"
+        );
         let layer = self
             .layer
             .clone()
             .ok_or_else(|| anyhow::anyhow!("render_to_image requires a layer-backed renderer"))?;
         let viewport_size = layer.drawable_size();
-        let viewport_size: Size<DevicePixels> = size(
+        let viewport_size: Size<DevicePixels> = gpui::size(
             (viewport_size.width.ceil() as i32).into(),
             (viewport_size.height.ceil() as i32).into(),
         );
@@ -667,7 +700,8 @@ impl MetalRenderer {
             .next_drawable()
             .ok_or_else(|| anyhow::anyhow!("Failed to get drawable for render_to_image"))?;
 
-        let command_buffer = self.render_frame(scene, drawable.texture(), viewport_size)?;
+        let command_buffer =
+            self.render_frame(scene, drawable.texture(), viewport_size, .., self.opaque)?;
 
         // Commit and wait for completion without presenting
         command_buffer.commit();
@@ -684,6 +718,21 @@ impl MetalRenderer {
         &mut self,
         scene: &Scene,
         size: Size<DevicePixels>,
+    ) -> Result<RgbaImage> {
+        anyhow::ensure!(
+            scene.native_views.is_empty() && scene.native_materials.is_empty(),
+            "native views require a separate pixel acquisition path"
+        );
+        self.render_scene_layer_to_image(scene, size, .., !self.opaque)
+    }
+
+    /// Reads one transparent or opaque scene layer without creating a window.
+    pub fn render_scene_layer_to_image(
+        &mut self,
+        scene: &Scene,
+        size: Size<DevicePixels>,
+        orders: impl RangeBounds<DrawOrder>,
+        transparent: bool,
     ) -> Result<RgbaImage> {
         if size.width.0 <= 0 || size.height.0 <= 0 {
             anyhow::bail!("Invalid size for render_scene_to_image: {:?}", size);
@@ -713,7 +762,8 @@ impl MetalRenderer {
             });
             let target_texture = self.device.new_texture(&texture_descriptor);
 
-            let command_buffer = self.render_frame(scene, &target_texture, size)?;
+            let command_buffer =
+                self.render_frame(scene, &target_texture, size, orders, !transparent)?;
 
             // Managed textures require an explicit blit synchronize before the CPU
             // can read back the rendered data. Without this, get_bytes returns
@@ -741,6 +791,10 @@ impl MetalRenderer {
     /// inspected.
     #[cfg(any(test, feature = "bench-support", feature = "test-support"))]
     pub fn render_scene(&mut self, scene: &Scene, size: Size<DevicePixels>) -> Result<()> {
+        anyhow::ensure!(
+            scene.native_views.is_empty() && scene.native_materials.is_empty(),
+            "native views require a separate pixel acquisition path"
+        );
         if size.width.0 <= 0 || size.height.0 <= 0 {
             anyhow::bail!("Invalid size for render_scene: {:?}", size);
         }
@@ -767,7 +821,8 @@ impl MetalRenderer {
                 .clone()
                 .expect("just ensured the render target exists");
 
-            let command_buffer = self.render_frame(scene, &target_texture, size)?;
+            let command_buffer =
+                self.render_frame(scene, &target_texture, size, .., self.opaque)?;
 
             // Commit without waiting, mirroring presentation to a real window where
             // the CPU doesn't block on the GPU.
@@ -783,10 +838,12 @@ impl MetalRenderer {
         writer: &mut InstanceBufferWriter,
         texture: &metal::TextureRef,
         viewport_size: Size<DevicePixels>,
+        orders: impl RangeBounds<DrawOrder>,
+        opaque: bool,
     ) -> Result<metal::CommandBuffer> {
         let command_queue = self.command_queue.clone();
         let command_buffer = command_queue.new_command_buffer();
-        let alpha = if self.opaque { 1. } else { 0. };
+        let alpha = if opaque { 1. } else { 0. };
 
         let mut command_encoder = new_command_encoder_for_texture(
             command_buffer,
@@ -795,15 +852,27 @@ impl MetalRenderer {
             Some(metal::MTLClearColor::new(0., 0., 0., alpha)),
         );
 
-        let mut pending_blurs = scene.backdrop_blurs.iter().enumerate().peekable();
-        for batch in scene.batches() {
+        let mut pending_blurs = scene
+            .backdrop_blurs
+            .iter()
+            .enumerate()
+            .filter(|(_, blur)| orders.contains(&blur.order))
+            .peekable();
+        let bounds = (orders.start_bound().cloned(), orders.end_bound().cloned());
+        for batch in scene
+            .batches_in(bounds)
+            .map(Some)
+            .chain(std::iter::once(None))
+        {
             // Backdrop blurs interleave by draw order OUTSIDE the batch
             // stream: break the pass here, snapshot the framebuffer, and
             // paint the blurred region back before continuing.
-            while pending_blurs
-                .peek()
-                .is_some_and(|(_, blur)| blur.order <= scene.batch_first_order(&batch))
-            {
+            while pending_blurs.peek().is_some_and(|(_, blur)| {
+                blur.order
+                    <= batch
+                        .as_ref()
+                        .map_or(DrawOrder::MAX, |batch| scene.batch_first_order(batch))
+            }) {
                 let (blur_index, blur) = pending_blurs.next().unwrap();
                 command_encoder.end_encoding();
                 let (scratch, blurred) = self.ensure_backdrop_scratch(texture);
@@ -854,6 +923,7 @@ impl MetalRenderer {
                     command_encoder,
                 );
             }
+            let Some(batch) = batch else { break };
             match batch {
                 PrimitiveBatch::Shadows(range) => {
                     self.draw_shadows(range, instance_bindings, viewport_size, command_encoder)
@@ -1324,7 +1394,7 @@ impl MetalRenderer {
         let Some(texture) = self.sprite_atlas.metal_texture(texture_id) else {
             return;
         };
-        let texture_size = size(
+        let texture_size = gpui::size(
             DevicePixels(texture.width() as i32),
             DevicePixels(texture.height() as i32),
         );
@@ -1380,7 +1450,7 @@ impl MetalRenderer {
         let Some(texture) = self.sprite_atlas.metal_texture(texture_id) else {
             return;
         };
-        let texture_size = size(
+        let texture_size = gpui::size(
             DevicePixels(texture.width() as i32),
             DevicePixels(texture.height() as i32),
         );
@@ -1457,7 +1527,7 @@ impl MetalRenderer {
 
         for (index, surface) in surfaces.iter().enumerate() {
             let image_buffer = &surface.image_buffer;
-            let texture_size = size(
+            let texture_size = gpui::size(
                 DevicePixels::from(CVPixelBufferGetWidth(image_buffer) as i32),
                 DevicePixels::from(CVPixelBufferGetHeight(image_buffer) as i32),
             );
@@ -2034,7 +2104,7 @@ mod tests {
 
         let bounds = Bounds {
             origin: Point::default(),
-            size: size(ScaledPixels(16.0), ScaledPixels(16.0)),
+            size: gpui::size(ScaledPixels(16.0), ScaledPixels(16.0)),
         };
         let mut scene = Scene::default();
         scene.insert_primitive(PaintSurface {
@@ -2048,7 +2118,7 @@ mod tests {
 
         let mut renderer = MetalRenderer::new_headless(Arc::new(Mutex::new(Default::default())));
         let image = renderer
-            .render_scene_to_image(&scene, size(DevicePixels(16), DevicePixels(16)))
+            .render_scene_to_image(&scene, gpui::size(DevicePixels(16), DevicePixels(16)))
             .unwrap();
         for image::Rgba([red, green, blue, alpha]) in image.pixels() {
             assert!(red.abs_diff(128) <= 2);

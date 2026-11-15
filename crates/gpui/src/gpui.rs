@@ -31,6 +31,8 @@ mod inspector;
 mod interactive;
 mod key_dispatch;
 mod keymap;
+pub mod native_material;
+pub mod native_view;
 mod offscreen;
 mod path_builder;
 mod platform;

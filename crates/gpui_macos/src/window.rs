@@ -2,7 +2,7 @@ use crate::{
     BoolExt, MacDisplay, NSRange, NSStringExt, TISCopyCurrentKeyboardInputSource,
     TISGetInputSourceProperty, WindowFrameSource, events::platform_input_from_native,
     kTISPropertyInputSourceIsASCIICapable, kTISPropertyInputSourceType, kTISTypeKeyboardInputMode,
-    ns_string, renderer,
+    native_view::Compositor, ns_string, renderer,
 };
 use anyhow::Result;
 use block2::RcBlock;
@@ -30,7 +30,8 @@ use gpui::{
     Pixels, PlatformAtlas, PlatformDisplay, PlatformFrameSignal, PlatformInput,
     PlatformInputHandler, PlatformWindow, Point, PromptButton, PromptLevel, RequestFrameOptions,
     SharedString, Size, SystemWindowTab, WindowAppearance, WindowBackgroundAppearance,
-    WindowBounds, WindowControlArea, WindowKind, WindowParams, WindowVisibility, point, px, size,
+    WindowBounds, WindowControlArea, WindowKind, WindowParams, WindowVisibility,
+    native_view::NativeCapabilities, point, px, size,
 };
 use image::RgbaImage;
 
@@ -672,6 +673,7 @@ struct MacWindowState {
     cursor_visible: Arc<AtomicBool>,
     frame_source: Option<WindowFrameSource>,
     renderer: renderer::Renderer,
+    compositor: Option<Compositor>,
     request_frame_callback: Option<Box<dyn FnMut(RequestFrameOptions)>>,
     event_callback: Option<Box<dyn FnMut(PlatformInput) -> gpui::DispatchEventResult>>,
     activate_callback: Option<Box<dyn FnMut(bool)>>,
@@ -1114,6 +1116,7 @@ impl MacWindow {
                     bounds.size.map(|pixels| pixels.as_f32()),
                     false,
                 ),
+                compositor: None,
                 request_frame_callback: None,
                 event_callback: None,
                 activate_callback: None,
@@ -1394,6 +1397,7 @@ impl Drop for MacWindow {
         // a cycle the delegate/`frame_source` teardown below cannot break. The
         // adapter is dropped in the close task below.
         let accesskit_adapter = this.accesskit_adapter.take();
+        let compositor = this.compositor.take();
         this.renderer.destroy();
         let window = this.native_window;
         let sheet_parent = this.sheet_parent.take();
@@ -1407,6 +1411,7 @@ impl Drop for MacWindow {
         this.visibility_callback.take();
         this.foreground_executor
             .spawn(async move {
+                drop(compositor);
                 unsafe {
                     if let Some(parent) = sheet_parent {
                         let _: () = msg_send![parent, endSheet: window];
@@ -1839,6 +1844,15 @@ impl PlatformWindow for MacWindow {
             .detach();
     }
 
+    fn focus(&self) {
+        let native_view = self.0.lock().native_view;
+        // SAFETY: the window owns this view and focus runs on the main thread.
+        let view = unsafe { &*native_view.as_ptr().cast::<Objc2NSView>() };
+        if let Some(window) = view.window() {
+            window.makeFirstResponder(Some(view));
+        }
+    }
+
     fn is_active(&self) -> bool {
         unsafe { self.0.lock().native_window.isKeyWindow() == YES }
     }
@@ -2153,12 +2167,90 @@ impl PlatformWindow for MacWindow {
         self.0.as_ref().lock().toggle_tab_bar_callback = Some(callback);
     }
 
+    fn native_surfaces(&self) -> NativeCapabilities {
+        NativeCapabilities {
+            views: true,
+            materials: true,
+        }
+    }
+
     fn draw(&self, scene: &gpui::Scene) {
         let mut this = self.0.lock();
-        this.renderer.draw(scene);
-        if let Some(focus) = this.pending_show.take() {
-            let native_window = this.native_window;
-            drop(this);
+        let mut compositor = this.compositor.take();
+        let retired = if scene.native_views.is_empty() && scene.native_materials.is_empty() {
+            if let Some(compositor) = &mut compositor {
+                compositor.clear();
+            }
+            this.renderer.draw(scene);
+            compositor
+                .as_mut()
+                .map(|compositor| std::mem::take(&mut compositor.retired))
+                .unwrap_or_default()
+        } else {
+            // SAFETY: the platform window owns this NSView and draw runs on the main thread.
+            let parent = unsafe { &*this.native_view.as_ptr().cast::<Objc2NSView>() };
+            if compositor.is_none() {
+                if let Some(mtm) = MainThreadMarker::new() {
+                    let state = Arc::downgrade(&self.0);
+                    let executor = this.foreground_executor.clone();
+                    let pending = Rc::new(std::cell::Cell::new(false));
+                    let changed = Rc::new(move || {
+                        if pending.replace(true) {
+                            return;
+                        }
+                        let pending = pending.clone();
+                        let state = state.clone();
+                        executor
+                            .spawn(async move {
+                                pending.set(false);
+                                let Some(state) = state.upgrade() else {
+                                    return;
+                                };
+                                let callback = state.lock().request_frame_callback.take();
+                                if let Some(mut callback) = callback {
+                                    callback(RequestFrameOptions {
+                                        force_render: true,
+                                        signal_source: FrameRequestSource::NativeCallback,
+                                        ..Default::default()
+                                    });
+                                    state.lock().request_frame_callback = Some(callback);
+                                }
+                            })
+                            .detach();
+                    });
+                    compositor = Some(Compositor::new(parent, changed, mtm));
+                }
+            }
+            let scale = this.scale_factor();
+            if let Some(compositor) = &mut compositor {
+                compositor
+                    .draw(parent, &mut this.renderer, scene, scale)
+                    .log_err();
+                std::mem::take(&mut compositor.retired)
+            } else {
+                Vec::new()
+            }
+        };
+        let focus_changes = compositor
+            .as_mut()
+            .map(|compositor| std::mem::take(&mut compositor.focus_changes))
+            .unwrap_or_default();
+        let presented = compositor
+            .as_mut()
+            .map(|compositor| std::mem::take(&mut compositor.presented))
+            .unwrap_or_default();
+        this.compositor = compositor;
+        let pending_show = this.pending_show.take();
+        let native_window = this.native_window;
+        drop(this);
+        for presented in presented {
+            presented();
+        }
+        for focus in focus_changes {
+            focus.apply();
+        }
+        drop(retired);
+        if let Some(focus) = pending_show {
             unsafe {
                 match focus {
                     true => native_window.makeKeyAndOrderFront_(nil),

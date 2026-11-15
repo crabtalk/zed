@@ -280,6 +280,7 @@ publish = false
 edition = "2024"
 
 [workspace.dependencies]
+ash = "0.38"
 
 #
 # Workspace member crates
@@ -707,6 +708,7 @@ nix = "0.30"
 notify-rust = "4"
 nucleo = { package = "nucleo-matcher", version = "0.3" }
 objc2 = "0.6"
+objc2-metal = { version = "0.3.2", default-features = false }
 objc2-ui-kit = { version = "0.3.2", default-features = false, features = [
     "std",
     "block2",
@@ -1004,6 +1006,7 @@ web-sys = "0.3"
 web-time = "1.1.0"
 webpki-roots = "1.0.10"
 webrtc-sys = "0.3.23"
+naga = { git = "https://github.com/gfx-rs/wgpu", rev = "cddb2f5d80dc0009b2ef6767635140cacf90a007" }
 # 30.0.1 lacks the Vulkan surface-drop fix (wgpu#10230) and WebGL resize fix (wgpu#10348).
 wgpu = { git = "https://github.com/gfx-rs/wgpu", rev = "cddb2f5d80dc0009b2ef6767635140cacf90a007", default-features = false }
 which = "8"

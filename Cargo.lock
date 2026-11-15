@@ -7562,6 +7562,7 @@ dependencies = [
  "log",
  "objc2 0.6.3",
  "objc2-app-kit 0.3.2",
+ "objc2-core-foundation",
  "objc2-core-graphics",
  "objc2-core-media",
  "objc2-core-video",
@@ -7606,6 +7607,7 @@ dependencies = [
  "gpui_web",
  "gpui_wgpu",
  "gpui_windows",
+ "reqwest_client",
 ]
 
 [[package]]
@@ -7669,6 +7671,7 @@ name = "gpui_wgpu"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "ash",
  "bytemuck",
  "collections",
  "cosmic-text",
@@ -7690,6 +7693,7 @@ dependencies = [
  "unicode-segmentation",
  "web-sys",
  "wgpu",
+ "windows 0.62.2",
  "zed-font-kit",
 ]
 
@@ -11699,6 +11703,7 @@ dependencies = [
  "objc2 0.6.3",
  "objc2-core-foundation",
  "objc2-foundation 0.3.2",
+ "objc2-quartz-core 0.3.2",
  "objc2-uniform-type-identifiers",
 ]
 

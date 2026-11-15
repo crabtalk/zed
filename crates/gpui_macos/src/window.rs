@@ -2,7 +2,7 @@ use crate::{
     BoolExt, MacDisplay, MetalFrames, NSRange, NSStringExt, TISCopyCurrentKeyboardInputSource,
     TISGetInputSourceProperty, WindowFrameSource, events::platform_input_from_native,
     kTISPropertyInputSourceIsASCIICapable, kTISPropertyInputSourceType, kTISTypeKeyboardInputMode,
-    ns_string, renderer,
+    native_view::Compositor, ns_string, renderer,
 };
 use anyhow::Result;
 use block2::RcBlock;
@@ -14,14 +14,16 @@ use gpui::{
     Pixels, PlatformAtlas, PlatformDisplay, PlatformFrameSignal, PlatformInput,
     PlatformInputHandler, PlatformWindow, Point, PromptButton, PromptLevel, RequestFrameOptions,
     SharedString, Size, SystemWindowTab, WindowAppearance, WindowBackgroundAppearance,
-    WindowBounds, WindowControlArea, WindowKind, WindowParams, WindowVisibility, point, px, size,
+    WindowBounds, WindowControlArea, WindowKind, WindowParams, WindowVisibility,
+    native_view::NativeCapabilities, point, px, size,
 };
-#[cfg(any(test, feature = "test-support"))]
 use image::RgbaImage;
 
 use core_foundation::base::{CFRelease, CFTypeRef};
-use core_foundation_sys::base::CFEqual;
-use core_foundation_sys::number::{CFBooleanGetValue, CFBooleanRef};
+use core_foundation_sys::{
+    base::CFEqual,
+    number::{CFBooleanGetValue, CFBooleanRef},
+};
 use core_graphics::display::CGDirectDisplayID;
 use ctor::ctor;
 use futures::channel::oneshot;
@@ -53,6 +55,7 @@ use objc2_foundation::{
     NSArray, NSInteger, NSNotFound, NSOperatingSystemVersion, NSPoint, NSProcessInfo, NSRect,
     NSSize, NSString, NSUInteger, NSURL,
 };
+use objc2_quartz_core::CAMetalLayer;
 use objc2_uniform_type_identifiers::{UTType, UTTypeData, UTTypeFolder};
 use parking_lot::Mutex;
 use raw_window_handle as rwh;
@@ -273,6 +276,7 @@ unsafe fn build_classes() {
         };
         BLURRED_VIEW_CLASS = {
             let mut decl = ClassBuilder::new(c"BlurredView", class!(NSVisualEffectView)).unwrap();
+            decl.add_ivar::<f64>(c"backgroundBlur");
             decl.add_method(
                 sel!(initWithFrame:),
                 blurred_view_init_with_frame as extern "C" fn(_, Sel, NSRect) -> *mut AnyObject,
@@ -659,10 +663,19 @@ struct MacWindowState {
     native_view: NonNull<AnyObject>,
     blurred_view: Option<*mut AnyObject>,
     background_appearance: WindowBackgroundAppearance,
+    background_blur: f64,
+    /// Set from `WindowParams::show` and taken by the first `draw`, which
+    /// orders the window front — `Some(true)` also makes it key.
+    pending_show: Option<bool>,
     cursor_style: CursorStyle,
     cursor_visible: Arc<AtomicBool>,
     frame_source: FrameSource,
-    renderer: renderer::Renderer,
+    renderer: Option<renderer::Renderer>,
+    sprite_atlas: Arc<dyn PlatformAtlas>,
+    backing_layer: Option<Retained<CAMetalLayer>>,
+    presents_with_transaction: bool,
+    display_link_attached: bool,
+    compositor: Option<Compositor>,
     request_frame_callback: Option<Box<dyn FnMut(RequestFrameOptions)>>,
     event_callback: Option<Box<dyn FnMut(PlatformInput) -> gpui::DispatchEventResult>>,
     activate_callback: Option<Box<dyn FnMut(bool)>>,
@@ -886,7 +899,7 @@ impl MacWindowState {
         }
         match &mut self.frame_source {
             FrameSource::Metal(metal_frames) => {
-                let Some(layer) = self.renderer.layer() else {
+                let Some(layer) = self.backing_layer.as_deref() else {
                     return;
                 };
                 let main_thread =
@@ -899,7 +912,10 @@ impl MacWindowState {
                 });
                 if let Some(source) = source {
                     metal_frames.replace(Some(source));
-                    self.renderer.set_display_link_attached(true);
+                    self.display_link_attached = true;
+                    if let Some(renderer) = &mut self.renderer {
+                        renderer.set_display_link_attached(true);
+                    }
                 }
             }
             FrameSource::DisplayLink(frame_source) => {
@@ -924,7 +940,10 @@ impl MacWindowState {
                     // Detach the link rather than pause it, so that a synchronous
                     // draw can use the layer's `nextDrawable`.
                     metal_frames.replace(None);
-                    self.renderer.set_display_link_attached(false);
+                    self.display_link_attached = false;
+                    if let Some(renderer) = &mut self.renderer {
+                        renderer.set_display_link_attached(false);
+                    }
                 }
             }
             FrameSource::DisplayLink(Some(frame_source)) => frame_source.stop(),
@@ -1166,13 +1185,20 @@ impl MacWindow {
                 native_view: NonNull::new_unchecked(native_view),
                 blurred_view: None,
                 background_appearance: WindowBackgroundAppearance::Opaque,
+                background_blur: 60.0,
+                pending_show: None,
                 cursor_style: CursorStyle::Arrow,
                 cursor_visible,
                 frame_source: match &metal_frames {
                     Some(metal_frames) => FrameSource::Metal(metal_frames.clone()),
                     None => FrameSource::DisplayLink(None),
                 },
-                renderer,
+                sprite_atlas: renderer.sprite_atlas().clone(),
+                backing_layer: renderer.layer().map(|layer| layer.retain()),
+                presents_with_transaction: renderer.presents_with_transaction(),
+                display_link_attached: renderer.is_display_link_attached(),
+                renderer: Some(renderer),
+                compositor: None,
                 request_frame_callback: None,
                 event_callback: None,
                 activate_callback: None,
@@ -1361,11 +1387,11 @@ impl MacWindow {
                 }
             }
 
-            if focus && show {
-                let _: () =
-                    msg_send![native_window, makeKeyAndOrderFront: ptr::null_mut::<AnyObject>()];
-            } else if show {
-                let _: () = msg_send![native_window, orderFront: ptr::null_mut::<AnyObject>()];
+            // Ordered front by the first `draw`: a window shown before it has
+            // a frame opens and closes as a black rectangle in AppKit's zoom
+            // animation.
+            if show {
+                window.0.lock().pending_show = Some(focus);
             }
 
             // Set the initial position of the window to the specified origin.
@@ -1455,11 +1481,13 @@ impl Drop for MacWindow {
         // hosts alive. Together with the `Rc<Mutex<MacWindowState>>` parked in
         // both views' `windowState` ivar, that forms
         // `MacWindowState -> adapter -> content view -> GPUIView -> MacWindowState`,
-        // a cycle the delegate/`frame_source` teardown below cannot break. Drop
-        // the adapter here so the native view, its `CAMetalLayer` and the
-        // renderer's command queue are actually released with the window.
-        drop(this.accesskit_adapter.take());
-        this.renderer.destroy();
+        // a cycle the delegate/`frame_source` teardown below cannot break. The
+        // adapter is dropped in the close task below.
+        let accesskit_adapter = this.accesskit_adapter.take();
+        let compositor = this.compositor.take();
+        if let Some(renderer) = &this.renderer {
+            renderer.destroy();
+        }
         let window = this.native_window;
         let sheet_parent = this.sheet_parent.take();
         match &mut this.frame_source {
@@ -1475,11 +1503,14 @@ impl Drop for MacWindow {
         this.visibility_callback.take();
         this.foreground_executor
             .spawn(async move {
+                drop(compositor);
                 unsafe {
                     if let Some(parent) = sheet_parent {
                         let _: () = msg_send![parent, endSheet: window];
                     }
                     let _: () = msg_send![window, close];
+                    let _: () = msg_send![class!(CATransaction), flush];
+                    drop(accesskit_adapter);
                     let _: *mut AnyObject = msg_send![window, autorelease];
                 }
             })
@@ -1901,6 +1932,15 @@ impl PlatformWindow for MacWindow {
             .detach();
     }
 
+    fn focus(&self) {
+        let native_view = self.0.lock().native_view;
+        // SAFETY: the window owns this view and focus runs on the main thread.
+        let view = unsafe { &*native_view.as_ptr().cast::<NSView>() };
+        if let Some(window) = view.window() {
+            window.makeFirstResponder(Some(view));
+        }
+    }
+
     fn is_active(&self) -> bool {
         self.0.lock().native_window().isKeyWindow()
     }
@@ -1943,7 +1983,9 @@ impl PlatformWindow for MacWindow {
         this.background_appearance = background_appearance;
 
         let opaque = background_appearance == WindowBackgroundAppearance::Opaque;
-        this.renderer.update_transparency(!opaque);
+        if let Some(renderer) = &mut this.renderer {
+            renderer.update_transparency(!opaque);
+        }
 
         unsafe {
             let _: () = msg_send![this.native_window, setOpaque: opaque.to_objc()];
@@ -1967,6 +2009,11 @@ impl PlatformWindow for MacWindow {
                 let blur_view: *mut AnyObject = msg_send![blur_view, initWithFrame: frame];
                 let _: () = msg_send![blur_view, setAutoresizingMask: NSAutoresizingMaskOptions::ViewWidthSizable
                         | NSAutoresizingMaskOptions::ViewHeightSizable];
+                *(*blur_view)
+                    .class()
+                    .instance_variable(c"backgroundBlur")
+                    .unwrap()
+                    .load_ptr::<f64>(&*blur_view) = this.background_blur;
 
                 let _: () = msg_send![
                     content_view,
@@ -1975,6 +2022,26 @@ impl PlatformWindow for MacWindow {
                     relativeTo: ptr::null_mut::<AnyObject>()
                 ];
                 this.blurred_view = Some(msg_send![blur_view, autorelease]);
+            }
+        }
+    }
+
+    fn set_background_blur(&self, radius: f64) {
+        let mut this = self.0.lock();
+        this.background_blur = radius;
+        if let Some(blur_view) = this.blurred_view {
+            unsafe {
+                *(*blur_view)
+                    .class()
+                    .instance_variable(c"backgroundBlur")
+                    .unwrap()
+                    .load_ptr::<f64>(&*blur_view) = radius;
+                // `setNeedsDisplay:` does not bring `updateLayer` back round on
+                // an `NSVisualEffectView`, so the filters are rewritten here.
+                let layer: *mut AnyObject = msg_send![blur_view, layer];
+                if !layer.is_null() {
+                    remove_layer_background(layer, radius);
+                }
             }
         }
     }
@@ -2199,9 +2266,125 @@ impl PlatformWindow for MacWindow {
         self.0.as_ref().lock().toggle_tab_bar_callback = Some(callback);
     }
 
+    fn native_surfaces(&self) -> NativeCapabilities {
+        NativeCapabilities {
+            views: true,
+            materials: true,
+        }
+    }
+
     fn draw(&self, scene: &gpui::Scene) {
         let mut this = self.0.lock();
-        this.renderer.draw(scene);
+        let Some(mut renderer) = this.renderer.take() else {
+            return;
+        };
+        let mut compositor = this.compositor.take();
+        let native_view = this.native_view;
+        let scale = this.scale_factor();
+        let size = this.content_size().to_device_pixels(scale);
+        let transparent = this.background_appearance != WindowBackgroundAppearance::Opaque;
+        let presents_with_transaction = this.presents_with_transaction;
+        let display_link_attached = this.display_link_attached;
+        let executor = this.foreground_executor.clone();
+        drop(this);
+        renderer.update_drawable_size(size);
+        renderer.update_transparency(transparent);
+        renderer.set_presents_with_transaction(presents_with_transaction);
+        renderer.set_display_link_attached(display_link_attached);
+        let retired = if scene.native_views.is_empty() && scene.native_materials.is_empty() {
+            if let Some(compositor) = &mut compositor {
+                compositor.clear();
+            }
+            renderer.draw(scene);
+            compositor
+                .as_mut()
+                .map(|compositor| std::mem::take(&mut compositor.retired))
+                .unwrap_or_default()
+        } else {
+            // SAFETY: the platform window owns this NSView and draw runs on the main thread.
+            let parent = unsafe { &*native_view.as_ptr().cast::<NSView>() };
+            if compositor.is_none() {
+                if let Some(mtm) = MainThreadMarker::new() {
+                    let state = Rc::downgrade(&self.0);
+                    let pending = Rc::new(std::cell::Cell::new(false));
+                    let changed = Rc::new(move || {
+                        if pending.replace(true) {
+                            return;
+                        }
+                        let pending = pending.clone();
+                        let state = state.clone();
+                        executor
+                            .spawn(async move {
+                                pending.set(false);
+                                let Some(state) = state.upgrade() else {
+                                    return;
+                                };
+                                let callback = state.lock().request_frame_callback.take();
+                                if let Some(mut callback) = callback {
+                                    callback(RequestFrameOptions {
+                                        force_render: true,
+                                        signal_source: FrameRequestSource::NativeCallback,
+                                        ..Default::default()
+                                    });
+                                    state.lock().request_frame_callback = Some(callback);
+                                }
+                            })
+                            .detach();
+                    });
+                    compositor = Some(Compositor::new(parent, changed, mtm));
+                }
+            }
+            if let Some(compositor) = &mut compositor {
+                compositor
+                    .draw(parent, &mut renderer, scene, scale)
+                    .log_err();
+                std::mem::take(&mut compositor.retired)
+            } else {
+                Vec::new()
+            }
+        };
+        let focus_changes = compositor
+            .as_mut()
+            .map(|compositor| std::mem::take(&mut compositor.focus_changes))
+            .unwrap_or_default();
+        let presented = compositor
+            .as_mut()
+            .map(|compositor| std::mem::take(&mut compositor.presented))
+            .unwrap_or_default();
+        let mut this = self.0.lock();
+        this.renderer = Some(renderer);
+        this.compositor = compositor;
+        let pending_show = this.pending_show.take();
+        let native_window = this.native_window;
+        drop(this);
+        for presented in presented {
+            presented();
+        }
+        for focus in focus_changes {
+            focus.apply();
+        }
+        drop(retired);
+        if let Some(focus) = pending_show {
+            unsafe {
+                match focus {
+                    true => {
+                        let _: () = msg_send![native_window, makeKeyAndOrderFront: ptr::null_mut::<AnyObject>()];
+                    }
+                    false => {
+                        let _: () =
+                            msg_send![native_window, orderFront: ptr::null_mut::<AnyObject>()];
+                    }
+                }
+            }
+        }
+    }
+
+    fn gpu_time(&self) -> Option<std::time::Duration> {
+        self.0
+            .lock()
+            .renderer
+            .as_ref()
+            .and_then(renderer::Renderer::gpu_time)
     }
 
     // GPUI calls this without waking the frame waker when a window only needs
@@ -2222,7 +2405,7 @@ impl PlatformWindow for MacWindow {
     }
 
     fn sprite_atlas(&self) -> Arc<dyn PlatformAtlas> {
-        self.0.lock().renderer.sprite_atlas().clone()
+        self.0.lock().sprite_atlas.clone()
     }
 
     fn gpu_specs(&self) -> Option<gpui::GpuSpecs> {
@@ -2234,7 +2417,7 @@ impl PlatformWindow for MacWindow {
         let window = state.native_window();
         let screen: *mut AnyObject = unsafe { msg_send![state.native_window, screen] };
         let frame = window.frame();
-        let layer = state.renderer.layer().map(|layer| {
+        let layer = state.backing_layer.as_ref().map(|layer| {
             let drawable_size = layer.drawableSize();
             serde_json::json!({
                 "drawable_size": [drawable_size.width, drawable_size.height],
@@ -2263,8 +2446,8 @@ impl PlatformWindow for MacWindow {
                 }),
             },
             "renderer": {
-                "display_link_attached": state.renderer.is_display_link_attached(),
-                "presents_with_transaction": state.renderer.presents_with_transaction(),
+                "display_link_attached": state.display_link_attached,
+                "presents_with_transaction": state.presents_with_transaction,
                 "layer": layer,
             },
             "request_frame_callback_installed": state.request_frame_callback.is_some(),
@@ -2503,10 +2686,26 @@ impl PlatformWindow for MacWindow {
         NSBeep()
     }
 
+    fn render_scene_to_image(
+        &self,
+        scene: &gpui::Scene,
+        size: gpui::Size<gpui::DevicePixels>,
+    ) -> Result<RgbaImage> {
+        self.0
+            .lock()
+            .renderer
+            .as_mut()
+            .ok_or_else(|| anyhow::anyhow!("window is presenting"))?
+            .render_scene_to_image(scene, size)
+    }
+
     #[cfg(any(test, feature = "test-support"))]
     fn render_to_image(&self, scene: &gpui::Scene) -> Result<RgbaImage> {
         let mut this = self.0.lock();
-        this.renderer.render_to_image(scene)
+        this.renderer
+            .as_mut()
+            .ok_or_else(|| anyhow::anyhow!("window is presenting"))?
+            .render_to_image(scene)
     }
 
     fn a11y_init(&self, callbacks: gpui::A11yCallbacks) {
@@ -3270,7 +3469,12 @@ fn update_window_scale_factor(window_state: &Rc<Mutex<MacWindowState>>) {
     let scale_factor = lock.scale_factor();
     let size = lock.content_size();
     let drawable_size = size.to_device_pixels(scale_factor);
-    let layer = lock.renderer.layer_ptr().cast::<AnyObject>();
+    let layer = lock
+        .backing_layer
+        .as_ref()
+        .map_or(ptr::null_mut(), |layer| {
+            Retained::as_ptr(layer).cast_mut().cast::<AnyObject>()
+        });
     if !layer.is_null() {
         unsafe {
             let _: () = msg_send![
@@ -3280,7 +3484,9 @@ fn update_window_scale_factor(window_state: &Rc<Mutex<MacWindowState>>) {
         }
     }
 
-    lock.renderer.update_drawable_size(drawable_size);
+    if let Some(renderer) = &mut lock.renderer {
+        renderer.update_drawable_size(drawable_size);
+    }
 
     if let Some(mut callback) = lock.resize_callback.take() {
         let content_size = lock.content_size();
@@ -3370,7 +3576,10 @@ extern "C" fn window_did_change_key_status(this: &AnyObject, selector: Sel, _: *
 
         if lock.activated_least_once {
             if let Some(mut callback) = lock.request_frame_callback.take() {
-                lock.renderer.set_presents_with_transaction(true);
+                lock.presents_with_transaction = true;
+                if let Some(renderer) = &mut lock.renderer {
+                    renderer.set_presents_with_transaction(true);
+                }
                 lock.stop_display_link();
                 drop(lock);
                 callback(RequestFrameOptions {
@@ -3381,7 +3590,10 @@ extern "C" fn window_did_change_key_status(this: &AnyObject, selector: Sel, _: *
 
                 let mut lock = window_state.lock();
                 lock.request_frame_callback = Some(callback);
-                lock.renderer.set_presents_with_transaction(false);
+                lock.presents_with_transaction = false;
+                if let Some(renderer) = &mut lock.renderer {
+                    renderer.set_presents_with_transaction(false);
+                }
                 lock.start_display_link(&window_state);
             }
         } else {
@@ -3445,7 +3657,12 @@ extern "C" fn close_window(this: &AnyObject, _: Sel) {
 extern "C" fn make_backing_layer(this: &AnyObject, _: Sel) -> *mut AnyObject {
     let window_state = unsafe { get_window_state(this) };
     let window_state = window_state.as_ref().lock();
-    window_state.renderer.layer_ptr() as *mut AnyObject
+    window_state
+        .backing_layer
+        .as_ref()
+        .map_or(ptr::null_mut(), |layer| {
+            Retained::as_ptr(layer).cast_mut().cast::<AnyObject>()
+        })
 }
 
 extern "C" fn view_did_change_backing_properties(this: &AnyObject, _: Sel) {
@@ -3480,7 +3697,9 @@ extern "C" fn set_frame_size(this: &AnyObject, _: Sel, size: NSSize) {
 
     let scale_factor = lock.scale_factor();
     let drawable_size = new_size.to_device_pixels(scale_factor);
-    lock.renderer.update_drawable_size(drawable_size);
+    if let Some(renderer) = &mut lock.renderer {
+        renderer.update_drawable_size(drawable_size);
+    }
 
     if let Some(mut callback) = lock.resize_callback.take() {
         let content_size = lock.content_size();
@@ -3496,7 +3715,10 @@ extern "C" fn display_layer(this: &AnyObject, _: Sel, _: *mut AnyObject) {
     let window_state = unsafe { get_window_state(this) };
     let mut lock = window_state.lock();
     if let Some(mut callback) = lock.request_frame_callback.take() {
-        lock.renderer.set_presents_with_transaction(true);
+        lock.presents_with_transaction = true;
+        if let Some(renderer) = &mut lock.renderer {
+            renderer.set_presents_with_transaction(true);
+        }
         lock.stop_display_link();
         drop(lock);
         callback(RequestFrameOptions {
@@ -3507,7 +3729,10 @@ extern "C" fn display_layer(this: &AnyObject, _: Sel, _: *mut AnyObject) {
 
         let mut lock = window_state.lock();
         lock.request_frame_callback = Some(callback);
-        lock.renderer.set_presents_with_transaction(false);
+        lock.presents_with_transaction = false;
+        if let Some(renderer) = &mut lock.renderer {
+            renderer.set_presents_with_transaction(false);
+        }
         lock.start_display_link(&window_state);
     }
 }
@@ -3546,10 +3771,15 @@ fn metal_frame(
         return;
     };
     let metal_frames = metal_frames.clone();
+    if lock.renderer.is_none() {
+        return;
+    }
     let Some(mut callback) = lock.request_frame_callback.take() else {
         return;
     };
-    lock.renderer.set_frame_drawable(Some(update.drawable()));
+    if let Some(renderer) = &mut lock.renderer {
+        renderer.set_frame_drawable(Some(update.drawable()));
+    }
     drop(lock);
     metal_frames.begin_frame();
     callback(RequestFrameOptions {
@@ -3561,7 +3791,10 @@ fn metal_frame(
     lock.request_frame_callback = Some(callback);
     // A frame with nothing to draw leaves its drawable unused; releasing it
     // lets the link hand it out again.
-    let used_drawable = lock.renderer.set_frame_drawable(None).is_none();
+    let used_drawable = lock
+        .renderer
+        .as_mut()
+        .is_none_or(|renderer| renderer.set_frame_drawable(None).is_none());
     metal_frames.end_frame(used_drawable);
 }
 
@@ -3728,6 +3961,7 @@ extern "C" fn do_command_by_selector(this: &AnyObject, _: Sel, _: Sel) {
             keystroke,
             is_held: false,
             prefer_character_input: false,
+            layout: None,
         }));
         state.as_ref().lock().do_command_handled = Some(!handled.propagate);
     }
@@ -3772,7 +4006,12 @@ extern "C" fn accepts_first_mouse(this: &AnyObject, _: Sel, _: *mut AnyObject) -
 extern "C" fn opaque_rect_for_window_move_when_in_titlebar(this: &AnyObject, _: Sel) -> NSRect {
     let zero_rect = NSRect::new(NSPoint::new(0., 0.), NSSize::new(0., 0.));
     let window_state = unsafe { get_window_state(this) };
-    let app_owns_titlebar_drag = window_state.as_ref().lock().app_owns_titlebar_drag;
+    let app_owns_titlebar_drag = {
+        let state = window_state.as_ref().lock();
+        // Native fullscreen shows the titlebar in an overlay that slides down
+        // with the menu bar; the content view claims none of it there.
+        state.app_owns_titlebar_drag && !state.is_fullscreen()
+    };
     if app_owns_titlebar_drag {
         unsafe { msg_send![this, bounds] }
     } else {
@@ -4044,6 +4283,11 @@ extern "C" fn blurred_view_init_with_frame(
     unsafe {
         let view: *mut AnyObject =
             msg_send![super(this, class!(NSVisualEffectView)), initWithFrame: frame];
+        *(*view)
+            .class()
+            .instance_variable(c"backgroundBlur")
+            .unwrap()
+            .load_ptr::<f64>(&*view) = 60.;
         // A window-background material, whose tint and extra saturation
         // `blurred_view_update_layer` strips, leaving only the blur. `Selection`, used before,
         // has no `CABackdropLayer` on macOS 27, so nothing behind the window was blurred. (Setting
@@ -4061,12 +4305,29 @@ extern "C" fn blurred_view_update_layer(this: &AnyObject, _: Sel) {
         let _: () = msg_send![super(this, class!(NSVisualEffectView)), updateLayer];
         let layer: *mut AnyObject = msg_send![this, layer];
         if !layer.is_null() {
-            remove_layer_background(layer);
+            remove_layer_background(
+                layer,
+                *this
+                    .class()
+                    .instance_variable(c"backgroundBlur")
+                    .unwrap()
+                    .load::<f64>(this),
+            );
+            // Fallback base BEHIND the backdrop sublayer. Mission Control and
+            // the Spaces switcher render window SNAPSHOTS, which omit backdrop
+            // layers entirely — with every background stripped above, the
+            // window read as fully transparent glass over the raw desktop
+            // there. An opaque dark root background is covered by the live
+            // blur in normal compositing, but keeps the snapshot reading as a
+            // solid dark surface (how stock vibrancy materials degrade).
+            let black: *mut AnyObject = msg_send![class!(NSColor), blackColor];
+            let black_cg: *mut AnyObject = msg_send![black, CGColor];
+            let _: () = msg_send![layer, setBackgroundColor: black_cg];
         }
     }
 }
 
-unsafe fn remove_layer_background(layer: *mut AnyObject) {
+unsafe fn remove_layer_background(layer: *mut AnyObject, blur_radius: f64) {
     unsafe {
         let _: () = msg_send![layer, setBackgroundColor: None::<&CGColor>];
 
@@ -4079,6 +4340,36 @@ unsafe fn remove_layer_background(layer: *mut AnyObject) {
 
         let filters: *mut AnyObject = msg_send![layer, filters];
         if !filters.is_null() {
+            let blur_test: *mut AnyObject = ns_string("Blur");
+            let count: NSUInteger = msg_send![filters, count];
+            for i in 0..count {
+                let filter: *mut AnyObject = msg_send![filters, objectAtIndex: i];
+                let description: *mut AnyObject = msg_send![filter, description];
+                let hit: Bool = msg_send![description, containsString: blur_test];
+                if hit.as_bool() {
+                    // A fresh filter in a fresh array: Core Animation does not
+                    // re-render a committed layer whose filter was mutated in
+                    // place and handed back.
+                    let radius: *mut AnyObject =
+                        msg_send![class!(NSNumber), numberWithDouble: blur_radius];
+                    let blur: *mut AnyObject = msg_send![filter, copy];
+                    let _: () = msg_send![blur, setValue: radius, forKey: ns_string("inputRadius")];
+                    // Without it the blur samples nothing past the window's
+                    // edge and darkens a band there as wide as the radius.
+                    let core_image: Bool = msg_send![blur, isKindOfClass: class!(CIFilter)];
+                    if !core_image.as_bool() {
+                        let yes: *mut AnyObject =
+                            msg_send![class!(NSNumber), numberWithBool: Bool::YES];
+                        let _: () = msg_send![blur, setValue: yes, forKey: ns_string("inputNormalizeEdges")];
+                    }
+                    let replaced: *mut AnyObject = msg_send![filters, mutableCopy];
+                    let _: () = msg_send![replaced, replaceObjectAtIndex: i, withObject: blur];
+                    let _: () = msg_send![layer, setFilters: replaced];
+                    let _: () = msg_send![blur, release];
+                    let _: () = msg_send![replaced, release];
+                    break;
+                }
+            }
             // Remove the increased saturation.
             // The effect of a `CAFilter` or `CIFilter` is determined by its name, and the
             // `description` reflects its name and some parameters. Currently `NSVisualEffectView`
@@ -4112,7 +4403,7 @@ unsafe fn remove_layer_background(layer: *mut AnyObject) {
             let count: NSUInteger = msg_send![sublayers, count];
             for i in 0..count {
                 let sublayer: *mut AnyObject = msg_send![sublayers, objectAtIndex: i];
-                remove_layer_background(sublayer);
+                remove_layer_background(sublayer, blur_radius);
             }
         }
     }
@@ -4253,3 +4544,7 @@ mod tests {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "../tests/window_blur/tests.rs"]
+mod blur_tests;

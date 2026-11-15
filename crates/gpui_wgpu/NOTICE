@@ -1,0 +1,3 @@
+Vulkan capability queries and DMA-BUF memory import are adapted from
+zeronsh/zui (Apache-2.0), https://github.com/zeronsh/zui.
+The atlas integration and explicit queue-family synchronization are modified.

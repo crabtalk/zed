@@ -14,11 +14,35 @@ pub fn background_executor() -> gpui::BackgroundExecutor {
 }
 
 pub fn application() -> gpui::Application {
-    gpui::Application::with_platform(current_platform(false))
+    #[cfg(target_family = "wasm")]
+    {
+        application_with_web_backend(gpui_web::WebBackendPreference::Auto)
+    }
+
+    #[cfg(not(target_family = "wasm"))]
+    with_http_client(gpui::Application::with_platform(current_platform(false)))
 }
 
 pub fn headless() -> gpui::Application {
-    gpui::Application::with_platform(current_platform(true))
+    #[cfg(target_family = "wasm")]
+    {
+        gpui::Application::with_platform(current_platform(true))
+    }
+
+    #[cfg(not(target_family = "wasm"))]
+    with_http_client(gpui::Application::with_platform(current_platform(true)))
+}
+
+/// Give an app the platform's HTTP client.
+///
+/// GPUI installs a `NullHttpClient` and leaves the real one to the app, so an
+/// app that skips this paints no remote image at all — and does it silently,
+/// because an element whose fetch failed shows the same fallback as one whose
+/// fetch has not landed yet. The web platform has the browser's own fetch;
+/// everywhere else it is reqwest.
+#[cfg(not(target_family = "wasm"))]
+fn with_http_client(app: gpui::Application) -> gpui::Application {
+    app.with_http_client(std::sync::Arc::new(reqwest_client::ReqwestClient::new()))
 }
 
 /// Returns a Linux app that may switch among `allowed_modes`.
@@ -77,7 +101,7 @@ pub fn current_platform(headless: bool) -> Rc<dyn Platform> {
                 true,
                 gpui_web::WebBackendPreference::Auto,
             ))
-        },
+        }
     }
 }
 
@@ -124,8 +148,7 @@ pub fn current_headless_renderer() -> anyhow::Result<Option<Box<dyn gpui::Platfo
 mod tests {
     use super::*;
     use gpui::{AppContext, Empty, VisualTestAppContext};
-    use std::cell::RefCell;
-    use std::time::Duration;
+    use std::{cell::RefCell, time::Duration};
 
     // Note: All VisualTestAppContext tests are ignored by default because they require
     // the macOS main thread. Standard Rust tests run on worker threads, which causes

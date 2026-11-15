@@ -7,11 +7,17 @@ use serde::{Deserialize, Serialize};
 use crate::{
     AtlasTextureId, AtlasTile, Background, Bounds, ContentMask, Corners, Edges, Hsla, Path,
     PathTiles, Pixels, Point, Radians, ScaledPixels, Size, TimedTransformation,
-    bounds_tree::BoundsTree,
+    bounds_tree::BoundsTree, native_material::NativeMaterial, native_view::NativeView,
 };
 use smallvec::SmallVec;
 use std::{
-    collections::VecDeque, fmt::Debug, iter::Peekable, ops::Range, rc::Rc, slice, time::Duration,
+    collections::VecDeque,
+    fmt::Debug,
+    iter::Peekable,
+    ops::{Bound, Range, RangeBounds},
+    rc::Rc,
+    slice,
+    time::Duration,
 };
 
 #[expect(missing_docs)]
@@ -52,6 +58,11 @@ pub struct Scene {
     primitive_bounds: BoundsTree<ScaledPixels>,
     layer_stack: Vec<usize>,
     layers: VecDeque<Layer>,
+    order_base: DrawOrder,
+    last_order: DrawOrder,
+    pub native_views: Vec<NativeView>,
+    pub native_materials: Vec<NativeMaterial>,
+    native_material_stack: Vec<usize>,
     pub shadows: Vec<Shadow>,
     pub quads: Vec<Quad>,
     pub paths: Vec<PaintedPath>,
@@ -60,6 +71,7 @@ pub struct Scene {
     pub subpixel_sprites: Vec<SubpixelSprite>,
     pub polychrome_sprites: Vec<PolychromeSprite>,
     pub surfaces: Vec<PaintSurface>,
+    pub backdrop_blurs: Vec<BackdropBlur>,
     animations: Vec<SpriteAnimation>,
 }
 
@@ -69,6 +81,11 @@ impl Scene {
         self.paint_operations.clear();
         self.primitive_bounds.clear();
         self.layer_stack.clear();
+        self.order_base = 0;
+        self.last_order = 0;
+        self.native_views.clear();
+        self.native_materials.clear();
+        self.native_material_stack.clear();
         self.layers.clear();
         self.paths.clear();
         self.shadows.clear();
@@ -78,6 +95,7 @@ impl Scene {
         self.subpixel_sprites.clear();
         self.polychrome_sprites.clear();
         self.surfaces.clear();
+        self.backdrop_blurs.clear();
         self.animations.clear();
     }
 
@@ -148,12 +166,49 @@ impl Scene {
         self.paint_operations.push(PaintOperation::EndLayer);
     }
 
+    /// The draw order of a batch's first primitive. Backdrop blurs sit outside
+    /// the batch stream, so this is what interleaves them back into it.
+    pub fn batch_first_order(&self, batch: &PrimitiveBatch) -> DrawOrder {
+        match batch {
+            PrimitiveBatch::Shadows(range) => self.shadows[range.start].order,
+            PrimitiveBatch::Quads(range) => self.quads[range.start].order,
+            PrimitiveBatch::Paths(range) => self.paths[range.start].order,
+            PrimitiveBatch::Underlines(range) => self.underlines[range.start].order,
+            PrimitiveBatch::MonochromeSprites { range, .. } => {
+                self.monochrome_sprites[range.start].order
+            }
+            PrimitiveBatch::SubpixelSprites { range, .. } => {
+                self.subpixel_sprites[range.start].order
+            }
+            PrimitiveBatch::PolychromeSprites { range, .. } => {
+                self.polychrome_sprites[range.start].order
+            }
+            PrimitiveBatch::Surfaces(range) => self.surfaces[range.start].order,
+        }
+    }
+
+    pub fn insert_backdrop_blur(&mut self, mut blur: BackdropBlur) {
+        let clipped_bounds = blur.bounds.intersect(&blur.content_mask.bounds);
+        if clipped_bounds.is_empty() {
+            return;
+        }
+        self.flush_layers();
+        blur.order = self.last_order + 1;
+        self.last_order = blur.order;
+        self.order_base = blur.order + 1;
+        self.primitive_bounds.clear();
+        self.backdrop_blurs.push(blur);
+        self.paint_operations
+            .push(PaintOperation::BackdropBlur(blur));
+    }
+
     fn insert_layer(&mut self, layer: Layer) {
         if layer.primitives.is_empty() {
             return;
         }
-        let order =
-            self.primitive_bounds
+        let order = self.order_base
+            + self
+                .primitive_bounds
                 .insert(layer.bounds, layer.max_kind, layer.max_shared_kind);
         for index in layer.primitives.into_iter().flatten() {
             if let PaintOperation::Primitive(primitive) = &self.paint_operations[index] {
@@ -187,9 +242,10 @@ impl Scene {
                 _ => layer.primitives.push(index..index + 1),
             }
         } else {
-            let order = self
-                .primitive_bounds
-                .insert(clipped_bounds, kind, kind.max_shared_kind());
+            let order = self.order_base
+                + self
+                    .primitive_bounds
+                    .insert(clipped_bounds, kind, kind.max_shared_kind());
             self.push_primitive(primitive.clone(), order);
         }
         self.paint_operations
@@ -198,6 +254,7 @@ impl Scene {
     }
 
     fn push_primitive(&mut self, primitive: Primitive, order: DrawOrder) {
+        self.last_order = self.last_order.max(order);
         match primitive {
             Primitive::Shadow(shadow) => self.shadows.push(Shadow { order, ..shadow }),
             Primitive::Quad(quad) => self.quads.push(Quad { order, ..quad }),
@@ -224,20 +281,121 @@ impl Scene {
         }
     }
 
+    fn flush_layers(&mut self) {
+        for index in 0..self.layers.len() {
+            let layer = std::mem::replace(
+                &mut self.layers[index],
+                Layer {
+                    primitives: SmallVec::new(),
+                    bounds: Bounds::default(),
+                    max_kind: PrimitiveKind::Shadow,
+                    max_shared_kind: PrimitiveKind::Surface,
+                },
+            );
+            self.insert_layer(layer);
+        }
+    }
+
+    pub fn insert_native_view(&mut self, mut view: NativeView) {
+        if view.bounds.intersect(&view.content_mask.bounds).is_empty() {
+            return;
+        }
+        self.flush_layers();
+        self.primitive_bounds.clear();
+        view.parent = self.native_material_stack.last().copied();
+        view.order = self.last_order + 1;
+        self.last_order = view.order;
+        self.order_base = view.order + 1;
+        self.native_views.push(view.clone());
+        self.paint_operations.push(PaintOperation::NativeView(view));
+    }
+
+    pub fn begin_native_material(&mut self, mut material: NativeMaterial) {
+        self.flush_layers();
+        self.primitive_bounds.clear();
+        material.order = self.last_order + 1;
+        material.end_order = material.order;
+        material.parent = self.native_material_stack.last().copied();
+        self.last_order = material.order;
+        self.order_base = material.order + 1;
+        self.native_material_stack.push(self.native_materials.len());
+        self.native_materials.push(material.clone());
+        self.paint_operations
+            .push(PaintOperation::BeginNativeMaterial(material));
+    }
+
+    pub fn end_native_material(&mut self) {
+        let index = self
+            .native_material_stack
+            .pop()
+            .expect("unbalanced native material scope");
+        self.flush_layers();
+        self.primitive_bounds.clear();
+        let order = self.last_order + 1;
+        self.native_materials[index].end_order = order;
+        self.last_order = order;
+        self.order_base = order + 1;
+        self.paint_operations
+            .push(PaintOperation::EndNativeMaterial);
+    }
+
     pub fn replay(&mut self, range: Range<usize>, prev_scene: &Scene) {
+        self.replay_translated(range, prev_scene, Point::default());
+    }
+
+    pub(crate) fn can_translate(&self, range: Range<usize>) -> bool {
+        self.paint_operations[range]
+            .iter()
+            .all(|operation| match operation {
+                PaintOperation::Primitive(primitive) => match primitive {
+                    Primitive::Quad(_)
+                    | Primitive::Underline(_)
+                    | Primitive::PolychromeSprite(_) => true,
+                    Primitive::MonochromeSprite(sprite) => {
+                        sprite.transformation == TransformationMatrix::unit()
+                            && sprite.animation == SpriteAnimationId::default()
+                    }
+                    Primitive::SubpixelSprite(sprite) => {
+                        sprite.transformation == TransformationMatrix::unit()
+                    }
+                    _ => false,
+                },
+                PaintOperation::StartLayer | PaintOperation::EndLayer => true,
+                PaintOperation::BackdropBlur(_)
+                | PaintOperation::NativeView(_)
+                | PaintOperation::BeginNativeMaterial(_)
+                | PaintOperation::EndNativeMaterial => false,
+            })
+    }
+
+    pub(crate) fn replay_translated(
+        &mut self,
+        range: Range<usize>,
+        prev_scene: &Scene,
+        offset: Point<ScaledPixels>,
+    ) {
         for operation in &prev_scene.paint_operations[range] {
             match operation {
                 PaintOperation::Primitive(primitive) => {
-                    // Animation ids index the scene they were inserted into.
-                    if let Primitive::MonochromeSprite(sprite) = primitive
+                    let mut primitive = primitive.clone();
+                    if offset != Point::default() {
+                        primitive.translate(offset);
+                    }
+                    if let Primitive::MonochromeSprite(sprite) = &primitive
                         && let Some(animation) =
                             prev_scene.animations.get(sprite.animation.0 as usize)
                     {
                         self.insert_animated_sprite(*sprite, *animation);
                     } else {
-                        self.insert_primitive(primitive.clone());
+                        self.insert_primitive(primitive);
                     }
                 }
+                PaintOperation::BackdropBlur(blur) => self.insert_backdrop_blur(*blur),
+                PaintOperation::NativeView(view) => self.insert_native_view(view.clone()),
+                PaintOperation::BeginNativeMaterial(material) => {
+                    self.begin_native_material(material.clone())
+                }
+                PaintOperation::EndNativeMaterial => self.end_native_material(),
                 PaintOperation::StartLayer => self.push_layer(),
                 PaintOperation::EndLayer => self.pop_layer(),
             }
@@ -261,6 +419,7 @@ impl Scene {
             (sprite.order, sprite.tile.texture_id.index)
         });
         self.surfaces.sort_by_key(|surface| surface.order);
+        self.backdrop_blurs.sort_by_key(|blur| blur.order);
 
         // Sorting moved the sprites, so animations learn where theirs ended up.
         if !self.animations.is_empty() {
@@ -280,23 +439,58 @@ impl Scene {
         allow(dead_code)
     )]
     pub fn batches(&self) -> impl Iterator<Item = PrimitiveBatch> + '_ {
+        self.batches_in(..)
+    }
+
+    /// Primitive indices refer to the original scene, including when a range
+    /// cuts through a batch. Call after `finish`.
+    pub fn batches_in(
+        &self,
+        orders: impl RangeBounds<DrawOrder>,
+    ) -> impl Iterator<Item = PrimitiveBatch> + '_ {
+        macro_rules! selected {
+            ($field:ident) => {{
+                let values = &self.$field;
+                let start = values.partition_point(|value| match orders.start_bound() {
+                    Bound::Included(start) => value.order < *start,
+                    Bound::Excluded(start) => value.order <= *start,
+                    Bound::Unbounded => false,
+                });
+                let end = start
+                    + values[start..].partition_point(|value| match orders.end_bound() {
+                        Bound::Included(end) => value.order <= *end,
+                        Bound::Excluded(end) => value.order < *end,
+                        Bound::Unbounded => true,
+                    });
+                (start, values[start..end].iter().peekable())
+            }};
+        }
+        let (shadows_start, shadows_iter) = selected!(shadows);
+        let (quads_start, quads_iter) = selected!(quads);
+        let (paths_start, paths_iter) = selected!(paths);
+        let (underlines_start, underlines_iter) = selected!(underlines);
+        let (monochrome_sprites_start, monochrome_sprites_iter) = selected!(monochrome_sprites);
+        let (subpixel_sprites_start, subpixel_sprites_iter) = selected!(subpixel_sprites);
+        let (polychrome_sprites_start, polychrome_sprites_iter) = selected!(polychrome_sprites);
+        let (surfaces_start, surfaces_iter) = selected!(surfaces);
         BatchIterator {
-            shadows_start: 0,
-            shadows_iter: self.shadows.iter().peekable(),
-            quads_start: 0,
-            quads_iter: self.quads.iter().peekable(),
-            paths_start: 0,
-            paths_iter: self.paths.iter().peekable(),
-            underlines_start: 0,
-            underlines_iter: self.underlines.iter().peekable(),
-            monochrome_sprites_start: 0,
-            monochrome_sprites_iter: self.monochrome_sprites.iter().peekable(),
-            subpixel_sprites_start: 0,
-            subpixel_sprites_iter: self.subpixel_sprites.iter().peekable(),
-            polychrome_sprites_start: 0,
-            polychrome_sprites_iter: self.polychrome_sprites.iter().peekable(),
-            surfaces_start: 0,
-            surfaces_iter: self.surfaces.iter().peekable(),
+            shadows_start,
+            shadows_iter,
+            quads_start,
+            quads_iter,
+            paths_start,
+            paths_iter,
+            underlines_start,
+            underlines_iter,
+            monochrome_sprites_start,
+            monochrome_sprites_iter,
+            subpixel_sprites_start,
+            subpixel_sprites_iter,
+            polychrome_sprites_start,
+            polychrome_sprites_iter,
+            surfaces_start,
+            surfaces_iter,
+            backdrop_blurs: self.backdrop_blurs.iter().peekable(),
         }
     }
 }
@@ -391,6 +585,10 @@ impl PrimitiveKind {
 
 pub(crate) enum PaintOperation {
     Primitive(Primitive),
+    BackdropBlur(BackdropBlur),
+    NativeView(NativeView),
+    BeginNativeMaterial(NativeMaterial),
+    EndNativeMaterial,
     StartLayer,
     EndLayer,
 }
@@ -410,6 +608,19 @@ pub enum Primitive {
 
 #[expect(missing_docs)]
 impl Primitive {
+    fn translate(&mut self, offset: Point<ScaledPixels>) {
+        let (bounds, mask) = match self {
+            Self::Quad(value) => (&mut value.bounds, &mut value.content_mask),
+            Self::Underline(value) => (&mut value.bounds, &mut value.content_mask),
+            Self::MonochromeSprite(value) => (&mut value.bounds, &mut value.content_mask),
+            Self::SubpixelSprite(value) => (&mut value.bounds, &mut value.content_mask),
+            Self::PolychromeSprite(value) => (&mut value.bounds, &mut value.content_mask),
+            _ => unreachable!("primitive cannot be translated"),
+        };
+        bounds.origin += offset;
+        mask.bounds.origin += offset;
+    }
+
     pub(crate) fn kind(&self) -> PrimitiveKind {
         match self {
             Primitive::Shadow(_) => PrimitiveKind::Shadow,
@@ -472,6 +683,7 @@ impl Primitive {
     allow(dead_code)
 )]
 struct BatchIterator<'a> {
+    backdrop_blurs: Peekable<slice::Iter<'a, BackdropBlur>>,
     shadows_start: usize,
     shadows_iter: Peekable<slice::Iter<'a, Shadow>>,
     quads_start: usize,
@@ -525,15 +737,24 @@ impl<'a> Iterator for BatchIterator<'a> {
                 PrimitiveKind::Surface,
             ),
         ];
-        orders_and_kinds.sort_by_key(|(order, kind)| (order.unwrap_or(u32::MAX), *kind));
+        orders_and_kinds.sort_by_key(|(order, kind)| (order.is_none(), *order, *kind));
 
         let first = orders_and_kinds[0];
         let second = orders_and_kinds[1];
-        let (batch_kind, max_order_and_kind) = if first.0.is_some() {
+        let (batch_kind, mut max_order_and_kind) = if first.0.is_some() {
             (first.1, (second.0.unwrap_or(u32::MAX), second.1))
         } else {
             return None;
         };
+
+        while self
+            .backdrop_blurs
+            .next_if(|blur| Some(blur.order) <= first.0)
+            .is_some()
+        {}
+        if let Some(blur) = self.backdrop_blurs.peek() {
+            max_order_and_kind = max_order_and_kind.min((blur.order, PrimitiveKind::Shadow));
+        }
 
         match batch_kind {
             PrimitiveKind::Shadow => {
@@ -776,6 +997,49 @@ impl From<Underline> for Primitive {
     }
 }
 
+/// A within-window backdrop blur region: the renderer snapshots everything
+/// painted below this order and paints it back gaussian-blurred inside the
+/// rounded bounds (frosted-glass popovers). Implemented by the Metal and wgpu
+/// renderers — see [`crate::Window::paint_backdrop_blur`].
+#[derive(Debug, Copy, Clone)]
+#[repr(C)]
+#[expect(missing_docs)]
+pub struct BackdropBlur {
+    pub order: DrawOrder,
+    pub blur_radius: ScaledPixels,
+    pub bounds: Bounds<ScaledPixels>,
+    pub content_mask: ContentMask<ScaledPixels>,
+    pub corner_radii: Corners<ScaledPixels>,
+    /// How deep the lens profile reaches in from the rim; 0 paints a flat frost.
+    pub lens: ScaledPixels,
+    /// The furthest that profile may drag the backdrop.
+    pub reach: ScaledPixels,
+    /// Displacement amplitude. Signed: positive samples toward the centre, so
+    /// the interior magnifies and what it displaces compresses at the rim;
+    /// negative inverts that.
+    pub magnify: f32,
+    /// Per-channel spread of the displacement — the chromatic fringe.
+    pub dispersion: f32,
+    /// Slope of `out = gain * saturated(backdrop) + tint`.
+    pub gain: f32,
+    /// How far the backdrop's chroma is pushed from its own grey, before the
+    /// gain drops the level. 1 passes it through; above 1 a surface can go
+    /// dark without its colours going with it.
+    pub saturation: f32,
+    /// Its offset. Transparent leaves the blur bare.
+    pub tint: Hsla,
+    /// How much white the lit rim adds, 0..1.
+    pub edge: f32,
+    /// How far in that light falls off to nothing.
+    pub edge_width: ScaledPixels,
+    /// Width of the coverage ramp at the boundary. Zero is a hard edge.
+    pub edge_aa: ScaledPixels,
+    /// The element tree's opacity here. The pass replaces its region rather
+    /// than blending, so a fading material has to mix itself back toward the
+    /// untouched backdrop; this rides the coverage that already does it.
+    pub opacity: f32,
+}
+
 #[derive(Debug, Copy, Clone)]
 #[repr(C)]
 #[expect(missing_docs)]
@@ -788,7 +1052,9 @@ pub struct Shadow {
     pub color: Hsla,
     pub shape_bounds: Bounds<ScaledPixels>,
     pub shape_corner_radii: Corners<ScaledPixels>,
-    pub inset: PaddedBool32,
+    pub element_bounds: Bounds<ScaledPixels>,
+    pub element_corner_radii: Corners<ScaledPixels>,
+    pub inset: u32,
     pub pad: u32, // align to 8 bytes
 }
 
@@ -1100,9 +1366,9 @@ pub struct PathTile {
 #[expect(missing_docs)]
 pub struct PaintedPath {
     order: DrawOrder,
-    bounds: Bounds<ScaledPixels>,
+    pub(crate) bounds: Bounds<ScaledPixels>,
     tiles: Rc<PathTiles>,
-    paint: PathPaint,
+    pub(crate) paint: PathPaint,
 }
 
 #[expect(missing_docs)]
@@ -1175,7 +1441,7 @@ mod tests {
     fn quad(x: f32) -> Quad {
         Quad {
             bounds: square(x),
-            content_mask: ContentMask { bounds: square(x) },
+            content_mask: ContentMask::new(square(x)),
             ..Default::default()
         }
     }
@@ -1185,7 +1451,7 @@ mod tests {
             order: 0,
             pad: 0,
             bounds: square(x),
-            content_mask: ContentMask { bounds: square(x) },
+            content_mask: ContentMask::new(square(x)),
             color: Hsla::default(),
             thickness: ScaledPixels(1.),
             wavy: false.into(),

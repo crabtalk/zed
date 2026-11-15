@@ -20,6 +20,26 @@ pub trait MouseEvent: InputEvent {}
 /// A gesture event from the platform.
 pub trait GestureEvent: InputEvent {}
 
+/// What the pressed key gives on the active keyboard layout, under each shift
+/// state.
+///
+/// [`Keystroke::key`] on macOS holds the shifted key for anything but `a`-`z`,
+/// and [`Modifiers::shift`] is cleared along with that fold: `shift-1`
+/// arrives as `!` with no shift held. These fields are what the fold drops.
+#[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
+pub struct KeyLayout {
+    /// The key with no modifier applied: `1` for `shift-1`.
+    pub unshifted: String,
+
+    /// The key shift gives, where the layout gives a different one: `!` for
+    /// `shift-1`, `A` for `shift-a`.
+    pub shifted: Option<String>,
+
+    /// Whether shift was held, which [`Keystroke::modifiers`] does not always
+    /// say.
+    pub shift: bool,
+}
+
 /// The key down event equivalent for the platform.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct KeyDownEvent {
@@ -32,6 +52,11 @@ pub struct KeyDownEvent {
     /// Whether to prefer character input over keybindings for this keystroke.
     /// In some cases, like AltGr on Windows, modifiers are significant for character input.
     pub prefer_character_input: bool,
+
+    /// What the layout gives for the key that was pressed. macOS fills this
+    /// for the text keys; the other platforms and the function keys leave it
+    /// `None`.
+    pub layout: Option<KeyLayout>,
 }
 
 impl Sealed for KeyDownEvent {}
@@ -47,6 +72,10 @@ impl KeyEvent for KeyDownEvent {}
 pub struct KeyUpEvent {
     /// The keystroke that was released.
     pub keystroke: Keystroke,
+
+    /// What the layout gives for the key that was released. Filled where
+    /// [`KeyDownEvent::layout`] is.
+    pub layout: Option<KeyLayout>,
 }
 
 impl Sealed for KeyUpEvent {}

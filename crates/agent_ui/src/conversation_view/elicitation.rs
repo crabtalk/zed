@@ -5,8 +5,7 @@ use component::{Component, ComponentScope, example_group_with_title, single_exam
 use editor::Editor;
 use futures::channel::oneshot;
 use gpui::{AnyElement, App, Div, Empty, Entity, Focusable, Role, SharedString, Window, div};
-use std::collections::BTreeMap;
-use std::rc::Rc;
+use std::{collections::BTreeMap, rc::Rc};
 use ui::{
     Button, Checkbox, ChoiceCard, Color, Icon, IconName, IconSize, Label, LabelSize, ToggleState,
     prelude::*,
@@ -504,6 +503,7 @@ mod tests {
                     PlatformInput::KeyUp(KeyUpEvent {
                         keystroke: Keystroke::parse_with_os(key, cx.platform_info().os)
                             .expect("valid test keystroke"),
+                        layout: None,
                     }),
                     cx,
                 );

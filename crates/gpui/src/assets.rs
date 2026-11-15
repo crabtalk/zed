@@ -68,6 +68,18 @@ impl RenderImage {
         }
     }
 
+    /// Transparent storage for an image updated through the window's atlas.
+    pub fn blank(size: Size<DevicePixels>) -> Result<Self> {
+        anyhow::ensure!(
+            size.width.0 > 0 && size.height.0 > 0,
+            "blank image must be nonempty"
+        );
+        Ok(Self::new([Frame::new(image::RgbaImage::new(
+            size.width.0 as u32,
+            size.height.0 as u32,
+        ))]))
+    }
+
     /// Convert this image into a byte slice.
     pub fn as_bytes(&self, frame_index: usize) -> Option<&[u8]> {
         self.data
@@ -129,5 +141,14 @@ mod tests {
         assert_eq!(image.render_size(0), Size::default());
         assert_eq!(image.delay(0), Delay::from_numer_denom_ms(100, 1));
         let _ = format!("{image:?}");
+    }
+}
+
+impl From<(&RenderImage, usize)> for RenderImageParams {
+    fn from((image, frame_index): (&RenderImage, usize)) -> Self {
+        Self {
+            image_id: image.id,
+            frame_index,
+        }
     }
 }

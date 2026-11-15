@@ -1584,14 +1584,6 @@ pub trait StatefulInteractiveElement: InteractiveElement {
         self
     }
 
-    /// Restrict scrolling of this element to the axis of the input gesture.
-    ///
-    /// See [`Style::restrict_scroll_to_axis`](crate::Style::restrict_scroll_to_axis) for details.
-    fn restrict_scroll_to_axis(mut self) -> Self {
-        self.interactivity().base_style.restrict_scroll_to_axis = Some(true);
-        self
-    }
-
     /// Track the scroll state of this element with the given handle.
     fn track_scroll(mut self, scroll_handle: &ScrollHandle) -> Self {
         self.interactivity().tracked_scroll_handle = Some(scroll_handle.clone());
@@ -2478,24 +2470,24 @@ impl Interactivity {
                     }
                 }
 
-                window.with_text_style(style.text_style().cloned(), |window| {
-                    window.with_content_mask(
-                        style.overflow_mask(bounds, window.rem_size()),
-                        |window| {
-                            let hitbox = if self.should_insert_hitbox(&style, window, cx) {
-                                Some(window.insert_hitbox(bounds, self.hitbox_behavior))
-                            } else {
-                                None
-                            };
+                window.with_element_opacity(style.opacity, |window| {
+                    window.with_text_style(style.text_style().cloned(), |window| {
+                        window.with_content_mask(
+                            style.overflow_mask(bounds, window.rem_size()),
+                            |window| {
+                                let hitbox = if self.should_insert_hitbox(&style, window, cx) {
+                                    Some(window.insert_hitbox(bounds, self.hitbox_behavior))
+                                } else {
+                                    None
+                                };
 
-                            let scroll_offset =
-                                self.clamp_scroll_position(bounds, &style, window, cx);
-                            let result = window.with_element_opacity(style.opacity, |window| {
-                                f(&style, scroll_offset, hitbox, window, cx)
-                            });
-                            (result, element_state)
-                        },
-                    )
+                                let scroll_offset =
+                                    self.clamp_scroll_position(bounds, &style, window, cx);
+                                let result = f(&style, scroll_offset, hitbox, window, cx);
+                                (result, element_state)
+                            },
+                        )
+                    })
                 })
             },
         )
@@ -3437,7 +3429,6 @@ impl Interactivity {
             let ongoing_scroll = self.ongoing_scroll.clone();
             let overflow = style.overflow;
             let allow_concurrent_scroll = style.allow_concurrent_scroll;
-            let restrict_scroll_to_axis = style.restrict_scroll_to_axis;
             let line_height = window.line_height();
             let hitbox = hitbox.clone();
             let current_view = window.current_view();
@@ -3447,8 +3438,7 @@ impl Interactivity {
                     let old_scroll_offset = *scroll_offset;
                     let mut delta = event.delta.pixel_delta(line_height);
 
-                    if restrict_scroll_to_axis
-                        && event.delta.precise()
+                    if event.delta.precise()
                         && let Some(ongoing_scroll) = &ongoing_scroll
                     {
                         ongoing_scroll
@@ -3457,21 +3447,11 @@ impl Interactivity {
                     }
 
                     let mut delta_x = match overflow.x {
-                        Overflow::Scroll if !delta.x.is_zero() => delta.x,
-                        Overflow::Scroll
-                            if !restrict_scroll_to_axis && overflow.y != Overflow::Scroll =>
-                        {
-                            delta.y
-                        }
+                        Overflow::Scroll => delta.x,
                         _ => Pixels::ZERO,
                     };
                     let mut delta_y = match overflow.y {
-                        Overflow::Scroll if !delta.y.is_zero() => delta.y,
-                        Overflow::Scroll
-                            if !restrict_scroll_to_axis && overflow.x != Overflow::Scroll =>
-                        {
-                            delta.x
-                        }
+                        Overflow::Scroll => delta.y,
                         _ => Pixels::ZERO,
                     };
                     if !allow_concurrent_scroll && !delta_x.is_zero() && !delta_y.is_zero() {
@@ -4536,8 +4516,8 @@ impl ScrollHandle {
 mod tests {
     use super::*;
     use crate::{
-        AnyWindowHandle, AppContext as _, Context, GestureTuning, InputEvent, IntoElement,
-        Keystroke, MouseMoveEvent, TestAppContext, TouchEvent, TouchId, canvas,
+        AnyWindowHandle, AppContext as _, Axis, Context, GestureTuning, InputEvent, IntoElement,
+        Keystroke, MouseMoveEvent, ScrollDelta, TestAppContext, TouchEvent, TouchId, canvas,
         util::FluentBuilder as _,
     };
     use std::{cell::Cell, rc::Weak};
@@ -4729,6 +4709,50 @@ mod tests {
         cx.update_window(any_window, |_, window, cx| window.draw(cx).clear(cx))
             .unwrap();
         assert_eq!(*hover_transitions.borrow(), [true, false]);
+    }
+
+    #[gpui::test]
+    fn default_hover_listener_stays_off_after_mouse_exits_window(cx: &mut TestAppContext) {
+        let hover_transitions = Rc::new(RefCell::new(Vec::new()));
+        let window = cx.add_window({
+            let hover_transitions = hover_transitions.clone();
+            move |_, _| HoverListenerLayoutTestView {
+                target_left: px(0.),
+                hover_transitions,
+            }
+        });
+        let any_window = AnyWindowHandle::from(window);
+
+        cx.update_window(any_window, |_, window, cx| {
+            window.draw(cx).clear(cx);
+            window.simulate_mouse_move(point(px(10.), px(10.)), cx);
+        })
+        .unwrap();
+        assert_eq!(*hover_transitions.borrow(), [true]);
+
+        cx.update_window(any_window, |_, window, cx| {
+            window.dispatch_event(
+                MouseExitEvent {
+                    position: point(px(10.), px(10.)),
+                    pressed_button: None,
+                    modifiers: crate::Modifiers::default(),
+                }
+                .to_platform_input(),
+                cx,
+            );
+            window.refresh();
+            window.draw(cx).clear(cx);
+            window.refresh();
+            window.draw(cx).clear(cx);
+        })
+        .unwrap();
+        assert_eq!(*hover_transitions.borrow(), [true, false]);
+
+        cx.update_window(any_window, |_, window, cx| {
+            window.simulate_mouse_move(point(px(10.), px(10.)), cx);
+        })
+        .unwrap();
+        assert_eq!(*hover_transitions.borrow(), [true, false, true]);
     }
 
     struct HoverListenerModeLayoutTestView {
@@ -5541,6 +5565,7 @@ mod tests {
                     keystroke,
                     is_held: false,
                     prefer_character_input: false,
+                    layout: None,
                 }
                 .to_platform_input(),
                 cx,
@@ -5553,7 +5578,14 @@ mod tests {
         let os = cx.read(|cx| cx.platform_info().os);
         let keystroke = Keystroke::parse_with_os(key, os).unwrap();
         cx.update_window(window, |_, window, cx| {
-            window.dispatch_event(KeyUpEvent { keystroke }.to_platform_input(), cx);
+            window.dispatch_event(
+                KeyUpEvent {
+                    keystroke,
+                    layout: None,
+                }
+                .to_platform_input(),
+                cx,
+            );
         })
         .unwrap();
     }
@@ -5776,6 +5808,70 @@ mod tests {
             .unwrap();
 
         assert_eq!(scroll_handle.max_offset().y, px(0.));
+    }
+
+    struct SingleAxisPane {
+        scroll_handle: ScrollHandle,
+        axis: Axis,
+    }
+
+    impl Render for SingleAxisPane {
+        fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
+            let pane = div()
+                .id("pane")
+                .size(px(100.))
+                .track_scroll(&self.scroll_handle)
+                .child(div().size(px(1000.)));
+            match self.axis {
+                Axis::Vertical => pane.overflow_y_scroll(),
+                Axis::Horizontal => pane.overflow_x_scroll(),
+            }
+        }
+    }
+
+    fn swipe_single_axis_pane(
+        axis: Axis,
+        delta: Point<Pixels>,
+        cx: &mut TestAppContext,
+    ) -> Point<Pixels> {
+        let scroll_handle = ScrollHandle::new();
+        let (_, cx) = cx.add_window_view({
+            let scroll_handle = scroll_handle.clone();
+            move |_, _| SingleAxisPane {
+                scroll_handle,
+                axis,
+            }
+        });
+        cx.run_until_parked();
+        cx.simulate_event(ScrollEvent {
+            position: point(px(50.), px(50.)),
+            delta: ScrollDelta::Pixels(delta),
+            ..Default::default()
+        });
+        scroll_handle.offset()
+    }
+
+    #[gpui::test]
+    fn a_single_axis_pane_ignores_wheel_input_on_the_other_axis(cx: &mut TestAppContext) {
+        let sideways = point(px(-40.), px(0.));
+        let downwards = point(px(0.), px(-40.));
+
+        assert_eq!(
+            swipe_single_axis_pane(Axis::Vertical, sideways, cx),
+            Point::default()
+        );
+        assert_eq!(
+            swipe_single_axis_pane(Axis::Horizontal, downwards, cx),
+            Point::default()
+        );
+        assert_eq!(
+            swipe_single_axis_pane(Axis::Vertical, downwards, cx),
+            downwards
+        );
+        assert_eq!(
+            swipe_single_axis_pane(Axis::Horizontal, sideways, cx),
+            sideways
+        );
     }
 
     struct ContentSizedGrid;

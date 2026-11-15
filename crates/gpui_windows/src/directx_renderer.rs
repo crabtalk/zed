@@ -20,8 +20,10 @@ use windows::{
     core::{HSTRING, Interface},
 };
 
-use crate::directx_renderer::shader_resources::{RawShaderBytes, ShaderModule, ShaderTarget};
-use crate::*;
+use crate::{
+    directx_renderer::shader_resources::{RawShaderBytes, ShaderModule, ShaderTarget},
+    *,
+};
 use gpui::*;
 
 pub(crate) const DISABLE_DIRECT_COMPOSITION: &str = "GPUI_DISABLE_DIRECT_COMPOSITION";
@@ -1031,6 +1033,8 @@ impl DirectXRenderPipelines {
 impl DirectComposition {
     pub fn new(dxgi_device: &IDXGIDevice, hwnd: HWND) -> Result<Self> {
         let comp_device = get_comp_device(dxgi_device)?;
+        // Not topmost: the window's child windows, such as a hosted WebView2,
+        // draw over gpui's content.
         let comp_target = unsafe { comp_device.CreateTargetForHwnd(hwnd, false) }?;
         let comp_visual = unsafe { comp_device.CreateVisual() }?;
 

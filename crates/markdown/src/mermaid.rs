@@ -4,11 +4,13 @@ use gpui::{
     ParsedSvg, RenderImage, SMOOTH_SVG_SCALE_FACTOR, ScrollDelta, ScrollEvent, ScrollHandle, Size,
     Stateful, StyledText, Task, Window, img, pulsating_between, size,
 };
-use std::collections::BTreeMap;
-use std::ops::Range;
-use std::path::Path;
-use std::sync::{Arc, OnceLock};
-use std::time::Duration;
+use std::{
+    collections::BTreeMap,
+    ops::Range,
+    path::Path,
+    sync::{Arc, OnceLock},
+    time::Duration,
+};
 use ui::{CopyButton, ScrollAxes, Scrollbars, TintColor, Tooltip, WithScrollbar, prelude::*};
 
 use crate::parser::{CodeBlockKind, MarkdownEvent, MarkdownTag};
@@ -744,7 +746,7 @@ fn mermaid_scroll_container(
     scroll_handle: &ScrollHandle,
     on_zoom: Option<MermaidZoomCallback>,
 ) -> Stateful<Div> {
-    let mut container = div()
+    div()
         .id(ElementId::named_usize(
             "mermaid-diagram-body",
             source_offset,
@@ -752,7 +754,7 @@ fn mermaid_scroll_container(
         .w_full()
         .overflow_x_scroll()
         .track_scroll(scroll_handle)
-        .on_scroll(on_mermaid_zoom_scroll(markdown, source_offset, on_zoom));
+        .on_scroll_wheel(on_mermaid_zoom_scroll(markdown, source_offset, on_zoom));
     // Without this, gpui maps vertical wheel deltas onto the x axis for
     // x-only scroll containers (see `paint_scroll_listener` in gpui's div),
     // hijacking plain vertical scrolls. Restricting to the actual axis lets
@@ -963,10 +965,7 @@ mod tests {
         Bounds, Context, Entity, IntoElement, Render, RenderImage, TestAppContext, Window, canvas,
         point, size,
     };
-    use std::cell::RefCell;
-    use std::rc::Rc;
-    use std::sync::Arc;
-    use std::time::Duration;
+    use std::{cell::RefCell, rc::Rc, sync::Arc, time::Duration};
     use ui::prelude::*;
 
     fn ensure_theme_initialized(cx: &mut TestAppContext) {

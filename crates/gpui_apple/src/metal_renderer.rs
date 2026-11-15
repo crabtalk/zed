@@ -2,12 +2,15 @@ use crate::metal_atlas::MetalAtlas;
 use anyhow::{Context as _, Result};
 use block2::RcBlock;
 use gpui::{
-    AtlasTextureId, Bounds, ContentMask, DevicePixels, PaintSurface, PaintedPath, PrimitiveBatch,
-    ScaledPixels, Scene, Size, quad_depth, quad_depth_scale, size,
+    AtlasTextureId, Bounds, ContentMask, DevicePixels, DrawOrder, PaintSurface, PaintedPath,
+    PrimitiveBatch, ScaledPixels, Scene, Size, quad_depth, quad_depth_scale, size,
 };
-#[cfg(any(test, feature = "bench-support", feature = "test-support"))]
 use image::RgbaImage;
-use objc2::{Message, rc::Retained, runtime::ProtocolObject};
+use objc2::{
+    Message, class, msg_send,
+    rc::Retained,
+    runtime::{AnyObject, ProtocolObject},
+};
 use objc2_core_foundation::{CFRetained, CGSize};
 use objc2_core_graphics::{CGColorSpace, kCGColorSpaceDisplayP3};
 use objc2_core_video::{
@@ -19,26 +22,38 @@ use objc2_foundation::{NSRange, NSString};
 #[cfg(target_os = "macos")]
 use objc2_metal::MTLCopyAllDevices;
 use objc2_metal::{
-    MTLBlendFactor, MTLBlendOperation, MTLBuffer, MTLClearColor, MTLCommandBuffer,
-    MTLCommandEncoder, MTLCommandQueue, MTLCompareFunction, MTLCreateSystemDefaultDevice,
-    MTLDepthStencilDescriptor, MTLDepthStencilState, MTLDevice, MTLDrawable, MTLGPUFamily,
-    MTLLibrary, MTLLoadAction, MTLPixelFormat, MTLPrimitiveType, MTLRenderCommandEncoder,
-    MTLRenderPassDescriptor, MTLRenderPipelineDescriptor, MTLRenderPipelineState,
-    MTLResourceOptions, MTLStorageMode, MTLStoreAction, MTLTexture, MTLTextureDescriptor,
-    MTLTextureUsage, MTLViewport,
+    MTLBlendFactor, MTLBlendOperation, MTLBlitCommandEncoder, MTLBuffer, MTLClearColor,
+    MTLCommandBuffer, MTLCommandEncoder, MTLCommandQueue, MTLCompareFunction,
+    MTLCreateSystemDefaultDevice, MTLDepthStencilDescriptor, MTLDepthStencilState, MTLDevice,
+    MTLDrawable, MTLGPUFamily, MTLLibrary, MTLLoadAction, MTLOrigin, MTLPixelFormat,
+    MTLPrimitiveType, MTLRegion, MTLRenderCommandEncoder, MTLRenderPassDescriptor,
+    MTLRenderPipelineDescriptor, MTLRenderPipelineState, MTLResource, MTLResourceOptions, MTLSize,
+    MTLStorageMode, MTLStoreAction, MTLTexture, MTLTextureDescriptor, MTLTextureUsage, MTLViewport,
 };
-#[cfg(any(test, feature = "bench-support", feature = "test-support"))]
-use objc2_metal::{MTLBlitCommandEncoder, MTLOrigin, MTLRegion, MTLSize};
 use objc2_quartz_core::{CAMetalDrawable, CAMetalLayer};
 use parking_lot::Mutex;
 
-use std::{cell::Cell, mem, mem::MaybeUninit, ops::Range, ptr, slice, sync::Arc};
+use std::{
+    cell::Cell,
+    mem,
+    mem::MaybeUninit,
+    ops::{Range, RangeBounds},
+    ptr, slice,
+    sync::{
+        Arc,
+        atomic::{AtomicU64, Ordering},
+    },
+    time::Duration,
+};
 
 #[cfg(not(feature = "runtime_shaders"))]
 const SHADERS_METALLIB: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/shaders.metallib"));
 #[cfg(feature = "runtime_shaders")]
 const SHADERS_SOURCE_FILE: &str = include_str!(concat!(env!("OUT_DIR"), "/stitched_shaders.metal"));
-/// Metal requires the offset a buffer is bound at to be 256-byte aligned.
+#[link(name = "MetalPerformanceShaders", kind = "framework")]
+unsafe extern "C" {}
+
+/// Metal buffer binding offsets must be 256-byte aligned.
 const INSTANCE_BUFFER_ALIGNMENT: usize = 256;
 const MAX_INSTANCE_BUFFER_SIZE: usize = 256 * 1024 * 1024;
 
@@ -141,12 +156,16 @@ pub struct MetalRenderer {
     depth_write_state: Retained<ProtocolObject<dyn MTLDepthStencilState>>,
     depth_test_state: Retained<ProtocolObject<dyn MTLDepthStencilState>>,
     depth_texture: Option<Retained<ProtocolObject<dyn MTLTexture>>>,
+    backdrop_pipeline: Retained<ProtocolObject<dyn MTLRenderPipelineState>>,
+    backdrop_scratch: Option<Retained<ProtocolObject<dyn MTLTexture>>>,
+    backdrop_blurred: Option<Retained<ProtocolObject<dyn MTLTexture>>>,
+    backdrop_kernel: Option<(f32, Retained<AnyObject>)>,
     instance_buffer_pool: Arc<Mutex<InstanceBufferPool>>,
     sprite_atlas: Arc<MetalAtlas>,
+    gpu_time: Arc<AtomicU64>,
     core_video_texture_cache: CFRetained<CVMetalTextureCache>,
     /// Offscreen render target reused across `render_scene` calls when
     /// rendering headlessly without reading pixels back.
-    #[cfg(any(test, feature = "bench-support", feature = "test-support"))]
     headless_render_target: Option<Retained<ProtocolObject<dyn MTLTexture>>>,
 }
 
@@ -218,7 +237,6 @@ impl MetalRenderer {
     ///
     /// This renderer can render scenes to images without requiring a CAMetalLayer,
     /// window, or AppKit. Use `render_scene_to_image()` to render scenes.
-    #[cfg(any(test, feature = "bench-support", feature = "test-support"))]
     pub fn new_headless(instance_buffer_pool: Arc<Mutex<InstanceBufferPool>>) -> Result<Self> {
         let device = Self::create_device()?;
         Self::new_internal(device, None, true, instance_buffer_pool)
@@ -355,6 +373,15 @@ impl MetalRenderer {
             true,
         )?;
 
+        let backdrop_pipeline = build_pipeline_state(
+            &device,
+            &library,
+            "backdrop_blur",
+            "backdrop_blur_vertex",
+            "backdrop_blur_fragment",
+            MTLPixelFormat::BGRA8Unorm,
+            false,
+        )?;
         let depth_write_state = build_depth_stencil_state(&device, true)?;
         let depth_test_state = build_depth_stencil_state(&device, false)?;
 
@@ -398,10 +425,14 @@ impl MetalRenderer {
             depth_write_state,
             depth_test_state,
             depth_texture: None,
+            backdrop_pipeline,
+            backdrop_scratch: None,
+            backdrop_blurred: None,
+            backdrop_kernel: None,
             instance_buffer_pool,
             sprite_atlas,
+            gpu_time: Arc::new(AtomicU64::new(0)),
             core_video_texture_cache,
-            #[cfg(any(test, feature = "bench-support", feature = "test-support"))]
             headless_render_target: None,
         })
     }
@@ -530,13 +561,14 @@ impl MetalRenderer {
             (texture.height() as i32).into(),
         );
 
-        let command_buffer = match self.render_frame(scene, &drawable.texture(), viewport_size) {
-            Ok(command_buffer) => command_buffer,
-            Err(error) => {
-                log::error!("failed to render: {error:#}");
-                return;
-            }
-        };
+        let command_buffer =
+            match self.render_frame(scene, &drawable.texture(), viewport_size, .., self.opaque) {
+                Ok(command_buffer) => command_buffer,
+                Err(error) => {
+                    log::error!("failed to render: {error:#}");
+                    return;
+                }
+            };
 
         if self.presents_with_transaction {
             command_buffer.commit();
@@ -548,11 +580,76 @@ impl MetalRenderer {
         }
     }
 
+    pub fn create_layer(&self) -> Retained<CAMetalLayer> {
+        let layer = CAMetalLayer::new();
+        Self::configure_layer(&layer, &self.device, true, false);
+        layer
+    }
+
+    pub fn draw_layer(
+        &mut self,
+        scene: &Scene,
+        layer: &CAMetalLayer,
+        orders: impl RangeBounds<DrawOrder>,
+        transparent: bool,
+    ) -> Result<()> {
+        objc2::rc::autoreleasepool(|_| {
+            layer.setPresentsWithTransaction(self.presents_with_transaction);
+            let viewport = layer.drawableSize();
+            let size = size(
+                (viewport.width.ceil() as i32).into(),
+                (viewport.height.ceil() as i32).into(),
+            );
+            anyhow::ensure!(
+                viewport.width > 0. && viewport.height > 0.,
+                "invalid layer size"
+            );
+            let drawable = if self
+                .layer
+                .as_ref()
+                .is_some_and(|base| ptr::eq(&**base, layer))
+            {
+                match &mut self.display_link_mode {
+                    DisplayLinkMode::Attached { drawable } => {
+                        drawable.take().context("missing display-link drawable")?
+                    }
+                    DisplayLinkMode::Detached => layer
+                        .nextDrawable()
+                        .context("retrieving composition drawable")?,
+                }
+            } else {
+                layer
+                    .nextDrawable()
+                    .context("retrieving composition drawable")?
+            };
+            let command_buffer =
+                self.render_frame(scene, &drawable.texture(), size, orders, !transparent)?;
+            if self.presents_with_transaction {
+                command_buffer.commit();
+                command_buffer.waitUntilScheduled();
+                drawable.present();
+            } else {
+                command_buffer.presentDrawable(ProtocolObject::from_ref(&*drawable));
+                command_buffer.commit();
+            }
+            Ok(())
+        })
+    }
+
+    pub fn gpu_time(&self) -> Option<Duration> {
+        match self.gpu_time.load(Ordering::Relaxed) {
+            0 => None,
+            nanos => Some(Duration::from_nanos(nanos)),
+        }
+    }
+
     fn render_frame(
         &mut self,
         scene: &Scene,
         texture: &ProtocolObject<dyn MTLTexture>,
         viewport_size: Size<DevicePixels>,
+        orders: impl RangeBounds<DrawOrder>,
+        opaque: bool,
     ) -> Result<Retained<ProtocolObject<dyn MTLCommandBuffer>>> {
         let mut writer = InstanceBufferWriter::new(
             &self.device,
@@ -578,12 +675,18 @@ impl MetalRenderer {
             texture,
             viewport_size,
             &mut surface_textures,
+            orders,
+            opaque,
         )?;
 
         let instance_buffer_pool = self.instance_buffer_pool.clone();
         let frame_resources = Cell::new(Some((writer.finish(), surface_textures)));
+        let gpu_time = self.gpu_time.clone();
         let block = RcBlock::new(
-            move |_: ptr::NonNull<ProtocolObject<dyn MTLCommandBuffer>>| {
+            move |buffer: ptr::NonNull<ProtocolObject<dyn MTLCommandBuffer>>| {
+                let buffer = unsafe { buffer.as_ref() };
+                let elapsed = (buffer.GPUEndTime() - buffer.GPUStartTime()).max(0.) * 1e9;
+                gpu_time.fetch_add(elapsed as u64, Ordering::Relaxed);
                 if let Some((instance_buffer, _surface_textures)) = frame_resources.take() {
                     instance_buffer_pool.lock().release(instance_buffer);
                 }
@@ -604,7 +707,6 @@ impl MetalRenderer {
     ///
     /// Note: This requires a layer-backed renderer. For headless rendering,
     /// use `render_scene_to_image()` instead.
-    #[cfg(any(test, feature = "test-support"))]
     pub fn render_to_image(&mut self, scene: &Scene) -> Result<RgbaImage> {
         let layer = self
             .layer
@@ -616,14 +718,17 @@ impl MetalRenderer {
             (viewport_size.height.ceil() as i32).into(),
         );
         // CAMetalDisplayLink owns the drawable, so render into a texture we own.
-        self.render_offscreen(scene, viewport_size)
+        anyhow::ensure!(
+            scene.native_views.is_empty() && scene.native_materials.is_empty(),
+            "native views require a separate pixel acquisition path"
+        );
+        self.render_offscreen(scene, viewport_size, .., self.opaque)
     }
 
     /// Renders a scene to an image without requiring a window or CAMetalLayer.
     ///
     /// This is the primary method for headless rendering. It creates an offscreen
     /// texture, renders the scene to it, and returns the pixel data as an RGBA image.
-    #[cfg(any(test, feature = "bench-support", feature = "test-support"))]
     pub fn render_scene_to_image(
         &mut self,
         scene: &Scene,
@@ -635,13 +740,32 @@ impl MetalRenderer {
 
         // Headless callers do not have a Cocoa event-loop pool to release
         // autoreleased command buffers and render-pass descriptors.
-        objc2::rc::autoreleasepool(|_| self.render_offscreen(scene, size))
+        anyhow::ensure!(
+            scene.native_views.is_empty() && scene.native_materials.is_empty(),
+            "native views require a separate pixel acquisition path"
+        );
+        objc2::rc::autoreleasepool(|_| self.render_offscreen(scene, size, .., self.opaque))
     }
 
     /// Renders a scene into a new offscreen texture of `size` and reads it
     /// back, without presenting anything.
-    #[cfg(any(test, feature = "bench-support", feature = "test-support"))]
-    fn render_offscreen(&mut self, scene: &Scene, size: Size<DevicePixels>) -> Result<RgbaImage> {
+    pub fn render_scene_layer_to_image(
+        &mut self,
+        scene: &Scene,
+        size: Size<DevicePixels>,
+        orders: impl RangeBounds<DrawOrder>,
+        transparent: bool,
+    ) -> Result<RgbaImage> {
+        objc2::rc::autoreleasepool(|_| self.render_offscreen(scene, size, orders, !transparent))
+    }
+
+    fn render_offscreen(
+        &mut self,
+        scene: &Scene,
+        size: Size<DevicePixels>,
+        orders: impl RangeBounds<DrawOrder>,
+        opaque: bool,
+    ) -> Result<RgbaImage> {
         if size.width.0 <= 0 || size.height.0 <= 0 {
             anyhow::bail!("Invalid size for render_offscreen: {:?}", size);
         }
@@ -667,7 +791,7 @@ impl MetalRenderer {
             .newTextureWithDescriptor(&texture_descriptor)
             .context("allocating offscreen render target")?;
 
-        let command_buffer = self.render_frame(scene, &target_texture, size)?;
+        let command_buffer = self.render_frame(scene, &target_texture, size, orders, opaque)?;
 
         // Managed textures require an explicit blit synchronize before the CPU
         // can read back the rendered data. Without this, get_bytes returns
@@ -693,7 +817,6 @@ impl MetalRenderer {
     /// encoding, instance buffer writes, command submission) and is used by
     /// headless benchmark rendering, where the produced pixels are never
     /// inspected.
-    #[cfg(any(test, feature = "bench-support", feature = "test-support"))]
     pub fn render_scene(&mut self, scene: &Scene, size: Size<DevicePixels>) -> Result<()> {
         if size.width.0 <= 0 || size.height.0 <= 0 {
             anyhow::bail!("Invalid size for render_scene: {:?}", size);
@@ -725,7 +848,8 @@ impl MetalRenderer {
                 .clone()
                 .context("retrieving headless render target")?;
 
-            let command_buffer = self.render_frame(scene, &target_texture, size)?;
+            let command_buffer =
+                self.render_frame(scene, &target_texture, size, .., self.opaque)?;
 
             // Commit without waiting, mirroring presentation to a real window where
             // the CPU doesn't block on the GPU.
@@ -741,25 +865,28 @@ impl MetalRenderer {
         texture: &ProtocolObject<dyn MTLTexture>,
         viewport_size: Size<DevicePixels>,
         surface_textures: &mut Vec<CFRetained<CVMetalTexture>>,
+        orders: impl RangeBounds<DrawOrder>,
+        opaque: bool,
     ) -> Result<Retained<ProtocolObject<dyn MTLCommandBuffer>>> {
         let command_queue = self.command_queue.clone();
         let command_buffer = command_queue
             .commandBuffer()
             .context("creating command buffer")?;
-        let alpha = if self.opaque { 1. } else { 0. };
-        let depth_texture = self.depth_texture_matching(texture)?;
+        let alpha = if opaque { 1. } else { 0. };
+        let depth_texture =
+            self.depth_texture_matching(texture, !scene.backdrop_blurs.is_empty())?;
 
-        let command_encoder = new_command_encoder_for_texture(
+        let mut command_encoder = new_command_encoder_for_texture(
             &command_buffer,
             texture,
             &depth_texture,
             viewport_size,
-            MTLClearColor {
+            Some(MTLClearColor {
                 red: 0.,
                 green: 0.,
                 blue: 0.,
                 alpha,
-            },
+            }),
         )?;
         let depth_scale = quad_depth_scale(scene.quads.len());
         // SAFETY: Metal copies both values, which match every vertex shader's
@@ -777,12 +904,84 @@ impl MetalRenderer {
             );
         }
 
-        self.draw_opaque_quads(scene.quads.len(), instance_bindings, &command_encoder);
+        let order_bounds = (orders.start_bound().cloned(), orders.end_bound().cloned());
+        let batches: Vec<_> = scene.batches_in(order_bounds).collect();
+        if scene.backdrop_blurs.is_empty() {
+            for batch in &batches {
+                if let PrimitiveBatch::Quads(range) = batch {
+                    self.draw_opaque_quads(range.clone(), instance_bindings, &command_encoder);
+                }
+            }
+        }
         command_encoder.setDepthStencilState(Some(&self.depth_test_state));
 
-        let mut quad_cursor: u32 = 0;
-        let mut path_tile_cursor = 0;
-        for batch in scene.batches() {
+        let mut pending_blurs = scene
+            .backdrop_blurs
+            .iter()
+            .enumerate()
+            .filter(|(_, blur)| orders.contains(&blur.order))
+            .peekable();
+        for batch in batches.into_iter().map(Some).chain(std::iter::once(None)) {
+            while pending_blurs.peek().is_some_and(|(_, blur)| {
+                blur.order
+                    <= batch
+                        .as_ref()
+                        .map_or(DrawOrder::MAX, |batch| scene.batch_first_order(batch))
+            }) {
+                let (index, blur) = pending_blurs.next().expect("pending blur");
+                command_encoder.endEncoding();
+                let (sharp, blurred) = self.backdrop_textures(texture)?;
+                let blit = command_buffer
+                    .blitCommandEncoder()
+                    .context("creating backdrop blit encoder")?;
+                unsafe {
+                    blit.copyFromTexture_sourceSlice_sourceLevel_sourceOrigin_sourceSize_toTexture_destinationSlice_destinationLevel_destinationOrigin(
+                        texture, 0, 0, MTLOrigin { x: 0, y: 0, z: 0 }, MTLSize { width: texture.width(), height: texture.height(), depth: 1 },
+                        &sharp, 0, 0, MTLOrigin { x: 0, y: 0, z: 0 });
+                }
+                blit.endEncoding();
+                let frosted = if blur.blur_radius.0 > 0. {
+                    let kernel = self.gaussian_kernel(blur.blur_radius.0);
+                    unsafe {
+                        let _: () = msg_send![kernel, encodeToCommandBuffer: &*command_buffer, sourceTexture: &*sharp, destinationTexture: &*blurred];
+                    }
+                    blurred
+                } else {
+                    sharp.clone()
+                };
+                command_encoder = new_command_encoder_for_texture(
+                    &command_buffer,
+                    texture,
+                    &depth_texture,
+                    viewport_size,
+                    None,
+                )?;
+                unsafe {
+                    command_encoder.setVertexBytes_length_atIndex(
+                        ptr::NonNull::from(&viewport_size).cast(),
+                        mem::size_of_val(&viewport_size),
+                        GlobalInputIndex::ViewportSize as usize,
+                    );
+                    command_encoder.setVertexBytes_length_atIndex(
+                        ptr::NonNull::from(&depth_scale).cast(),
+                        mem::size_of_val(&depth_scale),
+                        GlobalInputIndex::DepthScale as usize,
+                    );
+                }
+                self.draw_backdrop(
+                    index,
+                    instance_bindings,
+                    viewport_size,
+                    &frosted,
+                    &sharp,
+                    &command_encoder,
+                );
+                command_encoder.setDepthStencilState(Some(&self.depth_test_state));
+            }
+            let Some(batch) = batch else { break };
+
+            let order = scene.batch_first_order(&batch);
+            let quad_cursor = scene.quads.partition_point(|quad| quad.order < order) as u32;
             // Quad shaders assign each quad its own depth.
             // In every other batch type, the depth is fixed to the position of the quad cursor.
             let (znear, zfar) = if matches!(&batch, PrimitiveBatch::Quads(_)) {
@@ -805,15 +1004,22 @@ impl MetalRenderer {
                     self.draw_shadows(range, instance_bindings, &command_encoder)
                 }
                 PrimitiveBatch::Quads(range) => {
-                    quad_cursor += range.len() as u32;
+                    if !scene.backdrop_blurs.is_empty() {
+                        self.draw_opaque_quads(range.clone(), instance_bindings, &command_encoder);
+                        command_encoder.setDepthStencilState(Some(&self.depth_test_state));
+                    }
                     self.draw_quads(range, instance_bindings, &command_encoder)
                 }
                 PrimitiveBatch::Paths(range) => {
-                    let tiles_start = path_tile_cursor;
-                    path_tile_cursor += scene.paths[range]
+                    let tiles_start = scene.paths[..range.start]
                         .iter()
                         .map(PaintedPath::tile_count)
                         .sum::<usize>();
+                    let path_tile_cursor = tiles_start
+                        + scene.paths[range]
+                            .iter()
+                            .map(PaintedPath::tile_count)
+                            .sum::<usize>();
                     self.draw_path_tiles(
                         tiles_start..path_tile_cursor,
                         instance_bindings,
@@ -861,10 +1067,17 @@ impl MetalRenderer {
     fn depth_texture_matching(
         &mut self,
         target: &ProtocolObject<dyn MTLTexture>,
+        persistent: bool,
     ) -> Result<Retained<ProtocolObject<dyn MTLTexture>>> {
+        let storage = if self.is_apple_gpu && !persistent {
+            MTLStorageMode::Memoryless
+        } else {
+            MTLStorageMode::Private
+        };
         if let Some(depth_texture) = &self.depth_texture
             && depth_texture.width() == target.width()
             && depth_texture.height() == target.height()
+            && depth_texture.storageMode() == storage
         {
             return Ok(depth_texture.clone());
         }
@@ -878,11 +1091,7 @@ impl MetalRenderer {
         descriptor.setUsage(MTLTextureUsage::RenderTarget);
         // The depth buffer never leaves its render pass, so Apple GPUs can keep
         // it in tile memory without allocating any backing store.
-        descriptor.setStorageMode(if self.is_apple_gpu {
-            MTLStorageMode::Memoryless
-        } else {
-            MTLStorageMode::Private
-        });
+        descriptor.setStorageMode(storage);
         let depth_texture = self
             .device
             .newTextureWithDescriptor(&descriptor)
@@ -891,16 +1100,125 @@ impl MetalRenderer {
         Ok(depth_texture)
     }
 
+    fn backdrop_textures(
+        &mut self,
+        target: &ProtocolObject<dyn MTLTexture>,
+    ) -> Result<(
+        Retained<ProtocolObject<dyn MTLTexture>>,
+        Retained<ProtocolObject<dyn MTLTexture>>,
+    )> {
+        if self.backdrop_scratch.as_ref().is_none_or(|texture| {
+            texture.width() != target.width()
+                || texture.height() != target.height()
+                || texture.pixelFormat() != target.pixelFormat()
+        }) {
+            let descriptor = MTLTextureDescriptor::new();
+            unsafe {
+                descriptor.setWidth(target.width());
+                descriptor.setHeight(target.height());
+            }
+            descriptor.setPixelFormat(target.pixelFormat());
+            descriptor.setStorageMode(MTLStorageMode::Private);
+            descriptor.setUsage(MTLTextureUsage::ShaderRead);
+            self.backdrop_scratch = Some(
+                self.device
+                    .newTextureWithDescriptor(&descriptor)
+                    .context("allocating backdrop snapshot")?,
+            );
+            descriptor.setUsage(MTLTextureUsage::ShaderRead | MTLTextureUsage::ShaderWrite);
+            self.backdrop_blurred = Some(
+                self.device
+                    .newTextureWithDescriptor(&descriptor)
+                    .context("allocating blurred backdrop")?,
+            );
+        }
+        Ok((
+            self.backdrop_scratch
+                .clone()
+                .context("missing backdrop snapshot")?,
+            self.backdrop_blurred
+                .clone()
+                .context("missing blurred backdrop")?,
+        ))
+    }
+
+    fn gaussian_kernel(&mut self, sigma: f32) -> &AnyObject {
+        if self
+            .backdrop_kernel
+            .as_ref()
+            .is_some_and(|(cached, _)| (*cached - sigma).abs() >= 0.01)
+        {
+            self.backdrop_kernel = None;
+        }
+        let device = &self.device;
+        let (_, kernel) = self.backdrop_kernel.get_or_insert_with(|| unsafe {
+            let kernel: Retained<AnyObject> = msg_send![msg_send![class!(MPSImageGaussianBlur), alloc], initWithDevice: &**device, sigma: f64::from(sigma)];
+            let _: () = msg_send![&*kernel, setEdgeMode: 1usize];
+            (sigma, kernel)
+        });
+        kernel
+    }
+
+    fn draw_backdrop(
+        &self,
+        index: usize,
+        bindings: &InstanceBindings,
+        size: Size<DevicePixels>,
+        blurred: &ProtocolObject<dyn MTLTexture>,
+        sharp: &ProtocolObject<dyn MTLTexture>,
+        encoder: &ProtocolObject<dyn MTLRenderCommandEncoder>,
+    ) {
+        encoder.setRenderPipelineState(&self.backdrop_pipeline);
+        encoder.setDepthStencilState(None);
+        unsafe {
+            encoder.setVertexBuffer_offset_atIndex(
+                Some(&bindings.backdrop_blurs.buffer),
+                bindings.backdrop_blurs.offset,
+                BackdropBlurInputIndex::Blurs as usize,
+            );
+            encoder.setFragmentBuffer_offset_atIndex(
+                Some(&bindings.backdrop_blurs.buffer),
+                bindings.backdrop_blurs.offset,
+                BackdropBlurInputIndex::Blurs as usize,
+            );
+            encoder.setVertexBytes_length_atIndex(
+                ptr::NonNull::from(&size).cast(),
+                mem::size_of_val(&size),
+                BackdropBlurInputIndex::ViewportSize as usize,
+            );
+            encoder.setFragmentBytes_length_atIndex(
+                ptr::NonNull::from(&size).cast(),
+                mem::size_of_val(&size),
+                BackdropBlurInputIndex::ViewportSize as usize,
+            );
+            encoder.setFragmentTexture_atIndex(
+                Some(blurred),
+                BackdropBlurInputIndex::SourceTexture as usize,
+            );
+            encoder.setFragmentTexture_atIndex(
+                Some(sharp),
+                BackdropBlurInputIndex::SharpTexture as usize,
+            );
+            encoder.drawPrimitives_vertexStart_vertexCount_instanceCount_baseInstance(
+                MTLPrimitiveType::TriangleStrip,
+                0,
+                4,
+                1,
+                index,
+            );
+        }
+    }
+
     fn draw_opaque_quads(
         &self,
-        quad_count: usize,
+        quads: Range<usize>,
         instance_bindings: &InstanceBindings,
         command_encoder: &ProtocolObject<dyn MTLRenderCommandEncoder>,
     ) {
-        if quad_count == 0 {
+        if quads.is_empty() {
             return;
         }
-        let quad_count_value = quad_count as u32;
+        let quad_count_value = quads.end as u32;
 
         command_encoder.setRenderPipelineState(&self.opaque_quads_pipeline_state);
         command_encoder.setDepthStencilState(Some(&self.depth_write_state));
@@ -921,7 +1239,7 @@ impl MetalRenderer {
                 MTLPrimitiveType::TriangleStrip,
                 0,
                 4,
-                quad_count,
+                quads.len(),
                 0,
             );
         }
@@ -1196,6 +1514,11 @@ impl MetalRenderer {
         // SAFETY: The SurfaceBounds instances match the shader layout and slot.
         // Metal retains the buffers, and writer.finish publishes CPU writes before submission.
         unsafe {
+            command_encoder.setFragmentBuffer_offset_atIndex(
+                Some(&instance_bindings.surfaces.buffer),
+                instance_bindings.surfaces.offset,
+                SurfaceInputIndex::Surfaces as usize,
+            );
             command_encoder.setVertexBuffer_offset_atIndex(
                 Some(&instance_bindings.surfaces.buffer),
                 instance_bindings.surfaces.offset,
@@ -1289,7 +1612,7 @@ fn new_command_encoder_for_texture(
     texture: &ProtocolObject<dyn MTLTexture>,
     depth_texture: &ProtocolObject<dyn MTLTexture>,
     viewport_size: Size<DevicePixels>,
-    clear_color: MTLClearColor,
+    clear_color: Option<MTLClearColor>,
 ) -> Result<Retained<ProtocolObject<dyn MTLRenderCommandEncoder>>> {
     let render_pass_descriptor = MTLRenderPassDescriptor::new();
     // SAFETY: Index zero is within the render pass's color attachment array.
@@ -1300,15 +1623,31 @@ fn new_command_encoder_for_texture(
     };
     color_attachment.setTexture(Some(texture));
     color_attachment.setStoreAction(MTLStoreAction::Store);
-    color_attachment.setLoadAction(MTLLoadAction::Clear);
-    color_attachment.setClearColor(clear_color);
+    color_attachment.setLoadAction(if clear_color.is_some() {
+        MTLLoadAction::Clear
+    } else {
+        MTLLoadAction::Load
+    });
+    if let Some(color) = clear_color {
+        color_attachment.setClearColor(color);
+    }
 
     let depth_attachment = render_pass_descriptor.depthAttachment();
     depth_attachment.setTexture(Some(depth_texture));
-    depth_attachment.setLoadAction(MTLLoadAction::Clear);
+    depth_attachment.setLoadAction(if clear_color.is_some() {
+        MTLLoadAction::Clear
+    } else {
+        MTLLoadAction::Load
+    });
     depth_attachment.setClearDepth(0.0);
     // The depth buffer is only needed within this pass.
-    depth_attachment.setStoreAction(MTLStoreAction::DontCare);
+    depth_attachment.setStoreAction(
+        if depth_texture.storageMode() == MTLStorageMode::Memoryless {
+            MTLStoreAction::DontCare
+        } else {
+            MTLStoreAction::Store
+        },
+    );
 
     let command_encoder = command_buffer
         .renderCommandEncoderWithDescriptor(&render_pass_descriptor)
@@ -1324,7 +1663,6 @@ fn new_command_encoder_for_texture(
     Ok(command_encoder)
 }
 
-#[cfg(any(test, feature = "bench-support", feature = "test-support"))]
 fn read_texture_to_image(texture: &ProtocolObject<dyn MTLTexture>) -> Result<RgbaImage> {
     let width = texture.width() as u32;
     let height = texture.height() as u32;
@@ -1421,6 +1759,7 @@ struct InstanceBindings {
     monochrome_sprites: InstanceBinding,
     polychrome_sprites: InstanceBinding,
     surfaces: InstanceBinding,
+    backdrop_blurs: InstanceBinding,
 }
 
 fn write_instances(scene: &Scene, writer: &mut InstanceBufferWriter) -> Result<InstanceBindings> {
@@ -1431,6 +1770,7 @@ fn write_instances(scene: &Scene, writer: &mut InstanceBufferWriter) -> Result<I
         path.append_to(&mut path_paints, &mut path_curves, &mut path_tiles);
     }
     Ok(InstanceBindings {
+        backdrop_blurs: writer.write(&scene.backdrop_blurs)?,
         quads: writer.write(&scene.quads)?,
         path_tiles: writer.write(&path_tiles)?,
         path_curves: writer.write(&path_curves)?,
@@ -1636,12 +1976,10 @@ pub struct SurfaceBounds {
     pub content_mask: ContentMask<ScaledPixels>,
 }
 
-#[cfg(any(test, feature = "bench-support", feature = "test-support"))]
 pub struct MetalHeadlessRenderer {
     renderer: MetalRenderer,
 }
 
-#[cfg(any(test, feature = "bench-support", feature = "test-support"))]
 impl MetalHeadlessRenderer {
     pub fn new() -> Result<Self> {
         let instance_buffer_pool = Arc::new(Mutex::new(InstanceBufferPool::default()));
@@ -1650,7 +1988,6 @@ impl MetalHeadlessRenderer {
     }
 }
 
-#[cfg(any(test, feature = "bench-support", feature = "test-support"))]
 impl gpui::PlatformHeadlessRenderer for MetalHeadlessRenderer {
     fn render_scene_to_image(
         &mut self,
@@ -1784,7 +2121,7 @@ mod tests {
         scene.insert_primitive(PaintSurface {
             order: 0,
             bounds,
-            content_mask: ContentMask { bounds },
+            content_mask: ContentMask::new(bounds),
             image_buffer: image_buffer.clone(),
         });
         drop(image_buffer);
@@ -1825,6 +2162,8 @@ mod tests {
                 &scene,
                 &target_texture,
                 size(DevicePixels(16), DevicePixels(16)),
+                ..,
+                true,
             )
             .unwrap();
         if !uses_shared_storage {
@@ -1839,4 +2178,12 @@ mod tests {
         assert_eq!(command_buffer.status(), MTLCommandBufferStatus::Completed);
         assert_eq!(read_texture_to_image(&target_texture).unwrap(), image);
     }
+}
+
+#[repr(C)]
+enum BackdropBlurInputIndex {
+    Blurs = 2,
+    ViewportSize = 0,
+    SourceTexture = 3,
+    SharpTexture = 4,
 }

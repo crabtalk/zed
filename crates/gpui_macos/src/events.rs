@@ -1,6 +1,6 @@
 use gpui::{
-    Capslock, KeyDownEvent, KeyUpEvent, Keystroke, Modifiers, ModifiersChangedEvent, MouseButton,
-    MouseDownEvent, MouseExitEvent, MouseMoveEvent, MousePressureEvent, MouseUpEvent,
+    Capslock, KeyDownEvent, KeyLayout, KeyUpEvent, Keystroke, Modifiers, ModifiersChangedEvent,
+    MouseButton, MouseDownEvent, MouseExitEvent, MouseMoveEvent, MousePressureEvent, MouseUpEvent,
     NavigationDirection, PinchEvent, Pixels, PlatformInput, PressureStage, ScrollDelta,
     ScrollEvent, ScrollSource, TouchPhase, point, px,
 };
@@ -144,12 +144,14 @@ pub(crate) unsafe fn platform_input_from_native(
                 }))
             }
             NSEventType::KeyDown => Some(PlatformInput::KeyDown(KeyDownEvent {
-                keystroke: parse_keystroke(native_event),
+                keystroke: parse_keystroke(native_event).0,
+                layout: parse_keystroke(native_event).1,
                 is_held: native_event.isARepeat(),
                 prefer_character_input: false,
             })),
             NSEventType::KeyUp => Some(PlatformInput::KeyUp(KeyUpEvent {
-                keystroke: parse_keystroke(native_event),
+                keystroke: parse_keystroke(native_event).0,
+                layout: parse_keystroke(native_event).1,
             })),
             NSEventType::LeftMouseDown
             | NSEventType::RightMouseDown
@@ -345,7 +347,7 @@ pub(crate) unsafe fn platform_input_from_native(
     }
 }
 
-fn parse_keystroke(native_event: &NSEvent) -> Keystroke {
+fn parse_keystroke(native_event: &NSEvent) -> (Keystroke, Option<KeyLayout>) {
     let characters = unsafe {
         let characters: *mut AnyObject = msg_send![native_event, charactersIgnoringModifiers];
         characters.to_str().to_string()
@@ -362,6 +364,8 @@ fn parse_keystroke(native_event: &NSEvent) -> Keystroke {
         && first_char
             .is_none_or(|ch| !(NSUpArrowFunctionKey..=NSModeSwitchFunctionKey).contains(&ch));
 
+    let shift_held = shift;
+    let mut layout = None;
     #[allow(non_upper_case_globals)]
     let key = match first_char {
         Some(SPACE_KEY) => {
@@ -440,6 +444,12 @@ fn parse_keystroke(native_event: &NSEvent) -> Keystroke {
             let mut chars_ignoring_modifiers =
                 chars_for_modified_key(native_event.keyCode(), NO_MOD);
             let mut chars_with_shift = chars_for_modified_key(native_event.keyCode(), SHIFT_MOD);
+            layout = Some(KeyLayout {
+                unshifted: chars_ignoring_modifiers.clone(),
+                shifted: (chars_with_shift != chars_ignoring_modifiers)
+                    .then(|| chars_with_shift.clone()),
+                shift: shift_held,
+            });
             let always_use_cmd_layout = always_use_command_layout();
 
             // Handle Dvorak+QWERTY / Russian / Armenian
@@ -488,17 +498,20 @@ fn parse_keystroke(native_event: &NSEvent) -> Keystroke {
         }
     };
 
-    Keystroke {
-        modifiers: Modifiers {
-            control,
-            alt,
-            shift,
-            platform: command,
-            function,
+    (
+        Keystroke {
+            modifiers: Modifiers {
+                control,
+                alt,
+                shift,
+                platform: command,
+                function,
+            },
+            key,
+            key_char,
         },
-        key,
-        key_char,
-    }
+        layout,
+    )
 }
 
 fn always_use_command_layout() -> bool {

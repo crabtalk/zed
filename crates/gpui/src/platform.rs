@@ -43,7 +43,7 @@ use crate::{
     LineLayout, MissingGlyphSink, Pixels, PlatformGestures, PlatformInput, Point, Priority,
     RenderGlyphParams, RenderImage, RenderImageParams, RenderSvgParams, Scene, ShapedGlyph,
     ShapedRun, SharedString, Size, SvgRenderer, SystemWindowTab, Task, Window, WindowControlArea,
-    hash, point, px, size,
+    hash, native_view::NativeCapabilities, point, px, size,
 };
 #[cfg(any(target_os = "linux", target_os = "freebsd"))]
 use anyhow::bail;
@@ -51,10 +51,10 @@ use anyhow::{Context as _, Result};
 use async_task::Runnable;
 use collections::FxHashMap;
 use futures::channel::oneshot;
-#[cfg(any(test, feature = "test-support", feature = "bench-support"))]
-use image::RgbaImage;
-use image::codecs::{gif::GifDecoder, webp::WebPDecoder};
-use image::{DynamicImage, Frame, Rgba};
+use image::{
+    DynamicImage, Frame, Rgba, RgbaImage,
+    codecs::{gif::GifDecoder, webp::WebPDecoder},
+};
 use raw_window_handle::{HasDisplayHandle, HasWindowHandle};
 use scheduler::Instant;
 pub use scheduler::RunnableMeta;
@@ -62,19 +62,19 @@ use schemars::JsonSchema;
 use seahash::SeaHasher;
 use serde::{Deserialize, Serialize};
 use smallvec::SmallVec;
-use std::borrow::Cow;
-use std::collections::hash_map::Entry;
-use std::hash::{Hash, Hasher};
-use std::io::Cursor;
-use std::ops;
-use std::time::Duration;
 use std::{
+    borrow::Cow,
+    collections::hash_map::Entry,
     ffi::OsString,
     fmt::{self, Debug},
+    hash::{Hash, Hasher},
+    io::Cursor,
+    ops,
     ops::Range,
     path::{Path, PathBuf},
     rc::Rc,
     sync::Arc,
+    time::Duration,
 };
 use strum::EnumIter;
 use uuid::Uuid;
@@ -1327,6 +1327,8 @@ pub trait PlatformWindow: HasWindowHandle + HasDisplayHandle {
         answers: &[PromptButton],
     ) -> Option<oneshot::Receiver<usize>>;
     fn activate(&self);
+    /// Return keyboard input from an embedded native view to GPUI.
+    fn focus(&self) {}
     /// Requests that the operating system draw attention to this window.
     fn request_attention(&self) {}
     fn is_active(&self) -> bool;
@@ -1337,6 +1339,8 @@ pub trait PlatformWindow: HasWindowHandle + HasDisplayHandle {
     fn background_appearance(&self) -> WindowBackgroundAppearance;
     fn set_title(&mut self, title: &str);
     fn set_background_appearance(&self, background_appearance: WindowBackgroundAppearance);
+    /// Sets the backdrop filter radius. Unsupported platforms keep their existing appearance.
+    fn set_background_blur(&self, _radius: f64) {}
     fn minimize(&self);
     fn zoom(&self);
     fn toggle_fullscreen(&self);
@@ -1367,7 +1371,17 @@ pub trait PlatformWindow: HasWindowHandle + HasDisplayHandle {
     fn on_close(&self, callback: Box<dyn FnOnce()>);
     fn on_appearance_changed(&self, callback: Box<dyn FnMut()>);
     fn on_button_layout_changed(&self, _callback: Box<dyn FnMut()>) {}
+    /// Native views and material content scopes available in this backend.
+    fn native_surfaces(&self) -> NativeCapabilities {
+        NativeCapabilities::default()
+    }
     fn draw(&self, scene: &Scene);
+    /// How long the GPU has spent on this window's frames since it opened.
+    /// `None` where the renderer cannot measure it, which is every backend but
+    /// Metal.
+    fn gpu_time(&self) -> Option<Duration> {
+        None
+    }
     fn schedule_frame(&self) {}
     fn sprite_atlas(&self) -> Arc<dyn PlatformAtlas>;
     fn is_subpixel_rendering_supported(&self) -> bool;
@@ -1492,6 +1506,15 @@ pub trait PlatformWindow: HasWindowHandle + HasDisplayHandle {
     #[cfg(any(test, feature = "test-support", feature = "bench-support"))]
     fn as_test(&mut self) -> Option<&mut TestWindow> {
         None
+    }
+
+    /// Renders a scene into a separate target at the requested pixel size.
+    fn render_scene_to_image(
+        &self,
+        _scene: &Scene,
+        _size: Size<DevicePixels>,
+    ) -> Result<RgbaImage> {
+        anyhow::bail!("offscreen image rendering is unavailable on this platform")
     }
 
     /// Renders the given scene to a texture and returns the pixel data as an RGBA image.
@@ -1846,6 +1869,46 @@ pub trait PlatformAtlas {
     ) -> Result<Option<AtlasTile>>;
     fn remove(&self, key: &AtlasKey);
 
+    /// Returns whether a new, uninitialized tile was allocated. `None` means
+    /// this backend does not support external image updates.
+    fn insert_blank(&self, _key: &AtlasKey, _size: Size<DevicePixels>) -> Result<Option<bool>> {
+        Ok(None)
+    }
+
+    /// Queue an ordered update in tile-local device pixels. Completion runs
+    /// exactly once, outside atlas locks, after earlier reads have finished,
+    /// including when this update is rejected. `false` means the tile is absent.
+    fn update_tile(
+        &self,
+        _key: &AtlasKey,
+        _region: Bounds<DevicePixels>,
+        _update: crate::external_image::AtlasTileUpdate<'_>,
+        complete: Option<Box<dyn FnOnce() + Send>>,
+    ) -> Result<bool> {
+        if let Some(complete) = complete {
+            complete();
+        }
+        Ok(false)
+    }
+
+    #[cfg(target_os = "windows")]
+    fn shared_texture_adapter(&self) -> Option<crate::external_image::DxgiAdapterId> {
+        None
+    }
+
+    #[cfg(target_os = "linux")]
+    fn dmabuf_target(&self) -> Option<crate::external_image::DmabufTarget> {
+        None
+    }
+
+    #[cfg(target_os = "linux")]
+    fn import_dmabuf(
+        &self,
+        _buffer: &crate::external_image::Dmabuf<'_>,
+    ) -> Result<crate::external_image::DmabufImport> {
+        anyhow::bail!("this renderer cannot import DMA-BUFs")
+    }
+
     #[cfg(any(test, feature = "test-support", feature = "bench-support"))]
     fn contains(&self, _key: &AtlasKey) -> bool {
         false
@@ -1866,7 +1929,7 @@ pub trait AtlasBackend {
 
 #[doc(hidden)]
 pub struct AtlasState<Backend> {
-    tiles_by_key: FxHashMap<AtlasKey, AtlasTile>,
+    pub tiles_by_key: FxHashMap<AtlasKey, AtlasTile>,
     pub backend: Backend,
 }
 
@@ -2709,6 +2772,12 @@ pub struct WindowOptions {
     /// The appearance of the window background.
     pub window_background: WindowBackgroundAppearance,
 
+    /// Backdrop blur radius in native filter pixels, passed to macOS without scale conversion.
+    /// Defaults to 60.0. Zero disables blur while retaining transparency and background tint.
+    /// Only affects `Blurred` backgrounds on macOS; other platforms keep their existing appearance.
+    /// Negative values become zero; non-finite values leave the default unchanged.
+    pub window_background_blur: f64,
+
     /// Application identifier of the window. Can by used by desktop environments to group applications together.
     pub app_id: Option<String>,
 
@@ -2854,6 +2923,7 @@ impl Default for WindowOptions {
             is_minimizable: true,
             display_id: None,
             window_background: WindowBackgroundAppearance::default(),
+            window_background_blur: 60.0,
             icon: None,
             app_id: None,
             window_min_size: None,

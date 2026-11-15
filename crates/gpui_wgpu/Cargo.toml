@@ -42,6 +42,7 @@ gpui_util.workspace = true
 font-kit = { workspace = true, optional = true }
 
 [target.'cfg(any(target_os = "linux", target_os = "freebsd"))'.dependencies]
+ash.workspace = true
 wgpu = { workspace = true, features = ["std", "metal", "gles", "vulkan", "wgsl", "webgpu"] }
 
 [target.'cfg(not(any(target_os = "linux", target_os = "freebsd")))'.dependencies]
@@ -56,9 +57,11 @@ wgpu = { workspace = true, features = ["webgl"] }
 criterion.workspace = true
 gpui = { workspace = true, features = ["bench-support"] }
 image.workspace = true
-# Validate shaders with the same Naga revision that wgpu uses at runtime.
-naga = { git = "https://github.com/gfx-rs/wgpu", rev = "cddb2f5d80dc0009b2ef6767635140cacf90a007", features = ["wgsl-in"] }
+naga = { workspace = true, features = ["wgsl-in"] }
 
 [[bench]]
 name = "layout_line"
 harness = false
+
+[target.'cfg(target_os = "windows")'.dependencies]
+windows = { workspace = true, features = ["Win32_Graphics_Direct3D12", "Win32_Graphics_Dxgi_Common"] }

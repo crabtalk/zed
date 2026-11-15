@@ -46,7 +46,8 @@ objc2-core-foundation = { workspace = true, features = ["std", "CFData", "CFDict
 objc2-core-graphics = { workspace = true, features = ["CGColorSpace"] }
 objc2-core-text = { workspace = true, optional = true }
 objc2-core-video = { workspace = true, features = ["CVPixelBuffer", "CVMetalTexture", "CVMetalTextureCache", "CVReturn", "objc2", "objc2-metal"] }
-objc2-metal = { version = "0.3.2", default-features = false, features = [
+objc2-metal = { workspace = true, features = [
+    "objc2-core-foundation",
     "std",
     "block2",
     "dispatch2",

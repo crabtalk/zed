@@ -13,3 +13,9 @@ pub use wgpu_context::*;
 ))]
 pub use wgpu_renderer::WgpuHeadlessRenderer;
 pub use wgpu_renderer::{GpuContext, WgpuRenderer, WgpuSurfaceConfig};
+
+#[cfg(target_os = "linux")]
+mod dmabuf;
+
+#[cfg(target_os = "windows")]
+mod dxgi;

@@ -1,17 +1,15 @@
 use crate::{
     AnyElement, AnyEntity, AnyWeakEntity, App, AvailableSpace, Bounds, ContentMask, Context,
-    Element, ElementId, Entity, EntityId, GlobalElementId, InspectorElementId, IntoElement,
-    LayoutId, PaintIndex, Pixels, PrepaintStateIndex, Render, RenderOnce, Size, Style,
-    StyleRefinement, TextStyle, WeakEntity,
+    EdgeFade, Element, ElementId, Empty, Entity, EntityId, GlobalElementId, InspectorElementId,
+    IntoElement, LayoutId, PaintIndex, Pixels, Point, PrepaintStateIndex, Render, RenderOnce, Size,
+    Style, StyleRefinement, TextStyle, WeakEntity, Window,
 };
-use crate::{Empty, Window};
 use anyhow::Result;
 use collections::FxHashSet;
 use refineable::Refineable;
-use std::mem;
 use std::{
     any::{TypeId, type_name},
-    fmt,
+    fmt, mem,
     ops::Range,
 };
 
@@ -40,11 +38,16 @@ impl<V: Render> From<Entity<V>> for AnyView {
 impl AnyView {
     /// Embed this view as a cached [`ViewElement`] laid out at `style`.
     ///
-    /// The rendered subtree is recycled from the previous frame unless
-    /// [Context::notify] was called on the backing entity since it was rendered
-    /// (or [Window::refresh] is called, which ignores caching).
+    /// The subtree is reused until it or a descendant notifies, its layout or
+    /// inherited paint state changes, or the window is refreshed.
     pub fn cached(self, style: StyleRefinement) -> ViewElement<AnyView> {
         self.into_element().cached(style)
+    }
+
+    /// Cache a fixed-size subtree clipped to its bounds. Paint-only subtrees
+    /// can be reused at a new origin without rendering again.
+    pub fn cached_movable(self, style: StyleRefinement) -> ViewElement<AnyView> {
+        self.into_element().cached_movable(style)
     }
 
     /// Convert this to a weak handle.
@@ -249,14 +252,20 @@ impl<T: Render> View for Entity<T> {
 impl<T: Render> Entity<T> {
     /// Embed this entity as a cached [`ViewElement`] laid out at `style`.
     ///
-    /// The rendered subtree is reused until the entity is notified (or the
-    /// cached bounds / text style change). Caching requires a definite size:
+    /// The subtree is reused until the entity is notified or its bounds or
+    /// inherited paint state changes. Caching requires a definite size:
     /// a cached view is laid out from `style` and is *not* measured from its
     /// contents. Use [`ViewElement::new`] (or `.child(entity)`) for the
     /// uncached case.
     #[track_caller]
     pub fn cached(self, style: StyleRefinement) -> ViewElement<Entity<T>> {
         ViewElement::with_type_name(self, type_name::<T>()).cached(style)
+    }
+
+    /// Cache a fixed-size subtree clipped to its bounds. Subtrees with input
+    /// handlers or deferred drawing are rendered again when moved.
+    pub fn cached_movable(self, style: StyleRefinement) -> ViewElement<Entity<T>> {
+        ViewElement::with_type_name(self, type_name::<T>()).cached_movable(style)
     }
 }
 
@@ -267,6 +276,7 @@ pub struct ViewElement<V: View> {
     view: Option<V>,
     entity_id: Option<EntityId>,
     cached_style: Option<StyleRefinement>,
+    movable: bool,
     #[cfg(feature = "profiler")]
     view_type_name: &'static str,
     #[cfg(debug_assertions)]
@@ -289,6 +299,7 @@ impl<V: View> ViewElement<V> {
         ViewElement {
             entity_id,
             cached_style: None,
+            movable: false,
             #[cfg(feature = "profiler")]
             view_type_name,
             view: Some(view),
@@ -310,22 +321,57 @@ impl<V: View> ViewElement<V> {
         self.cached_style = Some(style);
         self
     }
+
+    fn cached_movable(mut self, style: StyleRefinement) -> Self {
+        self.cached_style = Some(style);
+        self.movable = true;
+        self
+    }
 }
 
-struct ViewElementState {
+pub(crate) struct ViewElementState {
     prepaint_range: Range<PrepaintStateIndex>,
     paint_range: Range<PaintIndex>,
     cache_key: ViewElementCacheKey,
     /// The entities the view accessed while it was last drawn, in any phase,
     /// restored when its prepaint is reused so the window stays subscribed.
     accessed_entities: FxHashSet<EntityId>,
+    translation: Point<Pixels>,
+}
+
+impl ViewElementState {
+    pub(crate) fn rebase_prepaint(
+        &mut self,
+        previous: &PrepaintStateIndex,
+        next: &PrepaintStateIndex,
+    ) {
+        self.prepaint_range.start.rebase(previous, next);
+        self.prepaint_range.end.rebase(previous, next);
+    }
+
+    pub(crate) fn rebase_paint(
+        &mut self,
+        previous: &PaintIndex,
+        next: &PaintIndex,
+        offset: Point<Pixels>,
+    ) {
+        self.paint_range.start.rebase(previous, next);
+        self.paint_range.end.rebase(previous, next);
+        self.cache_key.bounds.origin += offset;
+        self.cache_key.content_mask.bounds.origin += offset;
+        self.translation = Point::default();
+    }
 }
 
 struct ViewElementCacheKey {
     bounds: Bounds<Pixels>,
     content_mask: ContentMask<Pixels>,
     text_style: TextStyle,
+    movable: bool,
+    scale_factor: f32,
     opacity: f32,
+    rem_size: Pixels,
+    edge_fade: Option<EdgeFade>,
 }
 
 #[cfg(not(gpui_hot_reload))]
@@ -413,6 +459,7 @@ impl<V: View> Element for ViewElement<V> {
                 entity_id,
                 global_id,
                 bounds,
+                self.movable,
                 element,
                 window,
                 cx,
@@ -520,6 +567,7 @@ fn prepaint_view(
     entity_id: EntityId,
     global_id: Option<&GlobalElementId>,
     bounds: Bounds<Pixels>,
+    movable: bool,
     element: &mut Option<AnyElement>,
     window: &mut Window,
     cx: &mut App,
@@ -542,13 +590,32 @@ fn prepaint_view(
                 // Opacity is compared by bits so that a NaN opacity still matches itself
                 // and the view keeps using its cache.
                 if let Some(mut element_state) = element_state
-                    && element_state.cache_key.bounds == bounds
-                    && element_state.cache_key.content_mask == content_mask
+                    && element_state.cache_key.movable == movable
+                    && element_state.cache_key.scale_factor == window.scale_factor()
+                    && element_state.cache_key.opacity == window.element_opacity()
+                    && element_state.cache_key.rem_size == window.rem_size()
+                    && element_state.cache_key.edge_fade == window.edge_fade
+                    && (element_state.cache_key.bounds == bounds
+                        && element_state.cache_key.content_mask == content_mask
+                        || movable
+                            && window.edge_fade.is_none()
+                            && window.can_move_cached_view(
+                                &element_state.prepaint_range,
+                                &element_state.paint_range,
+                                element_state.cache_key.bounds,
+                                element_state.cache_key.content_mask,
+                                bounds,
+                                content_mask,
+                            ))
                     && element_state.cache_key.text_style == text_style
                     && element_state.cache_key.opacity.to_bits() == opacity.to_bits()
                     && !window.dirty_views.contains(&entity_id)
                     && !window.refreshing
                 {
+                    element_state.translation =
+                        bounds.origin - element_state.cache_key.bounds.origin;
+                    element_state.cache_key.bounds = bounds;
+                    element_state.cache_key.content_mask = content_mask;
                     let prepaint_start = window.prepaint_index();
                     window.reuse_prepaint(element_state.prepaint_range.clone());
                     cx.entities
@@ -559,21 +626,22 @@ fn prepaint_view(
                     return (None, element_state);
                 }
 
-                let refreshing = mem::replace(&mut window.refreshing, true);
                 let prepaint_start = window.prepaint_index();
                 let (element, accessed_entities) = cx.detect_accessed_entities(|cx| {
                     let mut element = render(window, cx);
                     element.layout_as_root(Size::<AvailableSpace>::from(bounds.size), window, cx);
-                    element.prepaint_at(bounds.origin, window, cx);
+                    window.with_content_mask(movable.then(|| ContentMask::new(bounds)), |window| {
+                        element.prepaint_at(bounds.origin, window, cx);
+                    });
                     element
                 });
 
                 let prepaint_end = window.prepaint_index();
-                window.refreshing = refreshing;
 
                 (
                     Some(element),
                     ViewElementState {
+                        translation: Point::default(),
                         accessed_entities,
                         prepaint_range: prepaint_start..prepaint_end,
                         paint_range: PaintIndex::default()..PaintIndex::default(),
@@ -581,7 +649,11 @@ fn prepaint_view(
                             bounds,
                             content_mask,
                             text_style,
+                            movable,
+                            scale_factor: window.scale_factor(),
                             opacity,
+                            rem_size: window.rem_size(),
+                            edge_fade: window.edge_fade,
                         },
                     },
                 )
@@ -630,13 +702,23 @@ fn paint_view(
                     // redrawn on the next frame.
                     if let Some(element) = element {
                         let refreshing = mem::replace(&mut window.refreshing, true);
-                        let ((), accessed_entities) =
-                            cx.detect_accessed_entities(|cx| element.paint(window, cx));
+                        let ((), accessed_entities) = cx.detect_accessed_entities(|cx| {
+                            window.with_content_mask(
+                                element_state
+                                    .cache_key
+                                    .movable
+                                    .then(|| ContentMask::new(element_state.cache_key.bounds)),
+                                |window| element.paint(window, cx),
+                            );
+                        });
                         element_state.accessed_entities.extend(accessed_entities);
                         window.refreshing = refreshing;
                         element_state.cache_key.opacity = opacity;
                     } else {
-                        window.reuse_paint(element_state.paint_range.clone());
+                        window.reuse_paint_translated(
+                            element_state.paint_range.clone(),
+                            element_state.translation,
+                        );
                         if element_state.cache_key.opacity.to_bits() != opacity.to_bits() {
                             window.request_animation_frame();
                         }

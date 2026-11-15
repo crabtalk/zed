@@ -4,12 +4,10 @@ use crate::DebugFrameOverlayMode;
 use crate::Inspector;
 #[cfg(feature = "profiler")]
 use crate::profiler;
-use crate::subscription::SingleSubscriberSet;
-use crate::taffy::TaffyLayoutEngine;
 use crate::{
     Action, AnyDrag, AnyElement, AnyImageCache, AnyTooltip, AnyView, App, AppContext, Arena, Asset,
-    AsyncWindowContext, AtlasTile, AvailableSpace, Background, BorderStyle, Bounds, BoxShadow,
-    Capslock, Context, Corners, CursorHideMode, CursorStyle, Decorations, DevicePixels,
+    AsyncWindowContext, AtlasTile, AvailableSpace, BackdropBlur, Background, BorderStyle, Bounds,
+    BoxShadow, Capslock, Context, Corners, CursorHideMode, CursorStyle, Decorations, DevicePixels,
     DispatchActionListener, DispatchNodeId, DispatchTree, DisplayId, Edges, Effect, Entity,
     EntityId, EventEmitter, FileDropEvent, FontId, Global, GlobalElementId, GlyphId, GpuSpecs,
     Hsla, InputHandler, InputPreference, IsZero, KeyBinding, KeyContext, KeyDownEvent, KeyEvent,
@@ -24,19 +22,30 @@ use crate::{
     TextInputStateChange, TextRenderingMode, TextStyle, TextStyleRefinement, ThermalState,
     TransformationMatrix, Underline, UnderlineStyle, WindowAppearance, WindowBackgroundAppearance,
     WindowBounds, WindowControls, WindowDecorations, WindowInsets, WindowOptions, WindowParams,
-    WindowTextSystem, WindowVisibility, point, prelude::*, px, rems, size, transparent_black,
+    WindowTextSystem, WindowVisibility,
+    gestures::{GestureTuning, RecognizedTouchGesture, TouchGestureRecognizer},
+    interactive::TouchEvent,
+    native_material::{MaterialState, MaterialStyle, NativeMaterial},
+    native_view::{NativeCapabilities, NativeView},
+    offscreen::Capture,
+    point,
+    prelude::*,
+    px, rems, size,
+    subscription::SingleSubscriberSet,
+    taffy::TaffyLayoutEngine,
+    transparent_black,
+    view::ViewElementState,
 };
 
-use crate::gestures::{GestureTuning, RecognizedTouchGesture, TouchGestureRecognizer};
-use crate::interactive::TouchEvent;
 use anyhow::{Context as _, Result, anyhow};
 use collections::{FxHashMap, FxHashSet};
 use derive_more::{Deref, DerefMut};
 use futures::channel::oneshot;
-use gpui_util::post_inc;
-use gpui_util::{ResultExt, measure};
-use itertools::FoldWhile::{Continue, Done};
-use itertools::Itertools;
+use gpui_util::{ResultExt, measure, post_inc};
+use itertools::{
+    FoldWhile::{Continue, Done},
+    Itertools,
+};
 #[cfg(any(target_os = "macos", target_os = "ios"))]
 use objc2_core_foundation::CFRetained;
 #[cfg(any(target_os = "macos", target_os = "ios"))]
@@ -837,6 +846,28 @@ impl HitboxId {
     }
 }
 
+/// A scoped vertical edge fade (see [`Window::with_edge_fade`]): primitives
+/// painted inside the scope get their opacity multiplied by a ramp that runs
+/// from 0 at an active edge of `bounds` to 1 a `band` further in. Built for
+/// scroll-edge fades over translucent/blurred window backgrounds, where a
+/// backdrop-colored gradient overlay cannot exist (there is no paintable
+/// color equal to "what is behind the window").
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct EdgeFade {
+    /// The faded region, in window coordinates.
+    pub bounds: Bounds<Pixels>,
+    /// Ramp height inside each active edge.
+    pub band: Pixels,
+    /// Fade primitives approaching the region's top edge.
+    pub top: bool,
+    /// Fade primitives approaching the region's bottom edge.
+    pub bottom: bool,
+    /// Fade primitives approaching the region's left edge.
+    pub left: bool,
+    /// Fade primitives approaching the region's right edge.
+    pub right: bool,
+}
+
 /// A rectangular region that potentially blocks hitboxes inserted prior.
 /// See [Window::insert_hitbox] for more details.
 #[derive(Clone, Debug, Deref)]
@@ -1095,6 +1126,44 @@ pub(crate) struct PaintIndex {
     line_layout_index: LineLayoutIndex,
 }
 
+impl PrepaintStateIndex {
+    pub(crate) fn rebase(&mut self, previous: &Self, next: &Self) {
+        self.hitboxes_index = next.hitboxes_index + (self.hitboxes_index - previous.hitboxes_index);
+        self.tooltips_index = next.tooltips_index + (self.tooltips_index - previous.tooltips_index);
+        self.deferred_draws_index =
+            next.deferred_draws_index + (self.deferred_draws_index - previous.deferred_draws_index);
+        self.dispatch_tree_index =
+            next.dispatch_tree_index + (self.dispatch_tree_index - previous.dispatch_tree_index);
+        self.accessed_element_states_index = next.accessed_element_states_index
+            + (self.accessed_element_states_index - previous.accessed_element_states_index);
+        self.line_layout_index
+            .rebase(&previous.line_layout_index, &next.line_layout_index);
+    }
+}
+
+impl PaintIndex {
+    pub(crate) fn rebase(&mut self, previous: &Self, next: &Self) {
+        #[cfg(any(test, feature = "test-support"))]
+        {
+            self.debug_bounds_index =
+                next.debug_bounds_index + (self.debug_bounds_index - previous.debug_bounds_index);
+        }
+        self.scene_index = next.scene_index + (self.scene_index - previous.scene_index);
+        self.mouse_listeners_index = next.mouse_listeners_index
+            + (self.mouse_listeners_index - previous.mouse_listeners_index);
+        self.input_handlers_index =
+            next.input_handlers_index + (self.input_handlers_index - previous.input_handlers_index);
+        self.cursor_styles_index =
+            next.cursor_styles_index + (self.cursor_styles_index - previous.cursor_styles_index);
+        self.accessed_element_states_index = next.accessed_element_states_index
+            + (self.accessed_element_states_index - previous.accessed_element_states_index);
+        self.tab_handle_index =
+            next.tab_handle_index + (self.tab_handle_index - previous.tab_handle_index);
+        self.line_layout_index
+            .rebase(&previous.line_layout_index, &next.line_layout_index);
+    }
+}
+
 impl Frame {
     #[cfg(any(test, feature = "test-support"))]
     pub(crate) fn record_debug_bounds(&mut self, selector: String, bounds: Bounds<Pixels>) {
@@ -1214,6 +1283,10 @@ impl Frame {
             }
         }
 
+        for view in &mut self.scene.native_views {
+            view.focused = view.focus.is_some() && view.focus == self.focus;
+            view.update_occlusions(&self.hitboxes);
+        }
         self.scene.finish();
     }
 }
@@ -1230,13 +1303,16 @@ pub struct Window {
     pub(crate) handle: AnyWindowHandle,
     pub(crate) invalidator: WindowInvalidator,
     pub(crate) removed: bool,
+    /// Backend capabilities initialized when the window opens.
+    pub native_surfaces: NativeCapabilities,
     pub(crate) platform_window: Box<dyn PlatformWindow>,
     pub(crate) display_id: Option<DisplayId>,
     pub(crate) display_observers: SingleSubscriberSet<AnyObserver>,
     is_resizable: bool,
     is_minimizable: bool,
     last_window_bounds: WindowBounds,
-    sprite_atlas: Arc<dyn PlatformAtlas>,
+    /// External producers use this atlas for import and capability negotiation.
+    pub sprite_atlas: Arc<dyn PlatformAtlas>,
     text_system: Rc<WindowTextSystem>,
     text_rendering_mode: Rc<Cell<TextRenderingMode>>,
     rem_size: Pixels,
@@ -1253,6 +1329,7 @@ pub struct Window {
     pub(crate) rendered_entity_stack: Vec<EntityId>,
     pub(crate) element_offset_stack: Vec<Point<Pixels>>,
     pub(crate) element_opacity: f32,
+    pub(crate) edge_fade: Option<EdgeFade>,
     pub(crate) content_mask_stack: Vec<ContentMask<Pixels>>,
     pub(crate) requested_autoscroll: Option<Bounds<Pixels>>,
     /// The [`TextInputConfiguration`] most recently forwarded to the platform
@@ -1267,16 +1344,21 @@ pub struct Window {
     pub(crate) next_tooltip_id: TooltipId,
     pub(crate) tooltip_bounds: Option<TooltipBounds>,
     pub(crate) next_frame_callbacks: Rc<RefCell<Vec<FrameCallback>>>,
+    display_frame_requested: Rc<Cell<bool>>,
     pub(crate) dirty_views: FxHashSet<EntityId>,
     focus_listeners: SingleSubscriberSet<AnyWindowFocusListener>,
     pub(crate) focus_lost_listeners: SingleSubscriberSet<AnyObserver>,
     focus_lost_path: SmallVec<[FocusId; 8]>,
     default_prevented: bool,
     mouse_position: Point<Pixels>,
+    /// Set by `MouseExited` and cleared by the next event that carries a pointer position.
+    /// While set, `mouse_position` is the last position inside the window and hits nothing.
+    mouse_exited: bool,
     mouse_hit_test: HitTest,
     modifiers: Modifiers,
     capslock: Capslock,
-    scale_factor: f32,
+    pub(crate) scale_factor: f32,
+    pub(crate) capture: Option<Capture>,
     pub(crate) bounds_observers: SingleSubscriberSet<AnyObserver>,
     appearance: WindowAppearance,
     pub(crate) appearance_observers: SingleSubscriberSet<AnyObserver>,
@@ -1636,6 +1718,36 @@ fn default_bounds(
     window_bounds_ctor(Bounds::new(final_origin, base_size))
 }
 
+/// What a backdrop blur paints: the frost, the lens over it, and its tint.
+/// A struct rather than arguments so a new knob does not change every caller.
+#[derive(Debug, Clone, Copy)]
+pub struct GlassEffect {
+    /// Gaussian sigma applied to the snapshot. Zero skips the blur entirely.
+    pub blur_radius: Pixels,
+    /// How deep the lens profile reaches in from the rim. Zero paints flat.
+    pub lens: Pixels,
+    /// The furthest the rim may drag the backdrop. The dome's tilt runs to
+    /// vertical at the rim, so the displacement needs a bound of its own.
+    pub reach: Pixels,
+    /// Displacement amplitude; signed, so its sign picks the direction.
+    pub magnify: f32,
+    /// Per-channel spread of the displacement — the chromatic fringe.
+    pub dispersion: f32,
+    /// Slope of `out = gain * saturated(backdrop) + tint`.
+    pub gain: f32,
+    /// How far the backdrop's chroma is pushed from its own grey, before the
+    /// gain drops the level. 1 passes it through.
+    pub saturation: f32,
+    /// Its offset, added.
+    pub tint: Hsla,
+    /// How much white the lit rim adds, 0..1.
+    pub edge: f32,
+    /// How far in that light falls off to nothing.
+    pub edge_width: Pixels,
+    /// Width of the coverage ramp at the shape's boundary. Zero is a hard edge.
+    pub edge_aa: Pixels,
+}
+
 impl Window {
     pub(crate) fn new(
         handle: AnyWindowHandle,
@@ -1657,6 +1769,7 @@ impl Window {
             is_minimizable,
             display_id,
             window_background,
+            window_background_blur,
             app_id,
             window_min_size,
             window_decorations,
@@ -1741,10 +1854,14 @@ impl Window {
         let needs_present = Rc::new(Cell::new(false));
         let scene_animation_interval = Rc::new(Cell::new(None::<Duration>));
         let next_frame_callbacks: Rc<RefCell<Vec<FrameCallback>>> = Default::default();
+        let display_frame_requested = Rc::new(Cell::new(false));
         let input_rate_tracker = Rc::new(RefCell::new(InputRateTracker::default()));
 
         platform_window
             .request_decorations(window_decorations.unwrap_or(WindowDecorations::Server));
+        if window_background_blur.is_finite() {
+            platform_window.set_background_blur(window_background_blur.max(0.0));
+        }
         platform_window.set_background_appearance(window_background);
 
         match window_bounds {
@@ -1907,6 +2024,7 @@ impl Window {
             let needs_present = needs_present.clone();
             let scene_animation_interval = scene_animation_interval.clone();
             let next_frame_callbacks = next_frame_callbacks.clone();
+            let display_frame_requested = display_frame_requested.clone();
             let input_rate_tracker = input_rate_tracker.clone();
             let mut deferred_force_render = false;
             let mut frame_pacer = FramePacer::default();
@@ -2038,6 +2156,7 @@ impl Window {
                 }
 
                 let pending_next_frame_callbacks = next_frame_callbacks.take();
+                display_frame_requested.set(false);
                 if !pending_next_frame_callbacks.is_empty() {
                     handle
                         .update(&mut cx, |_, window, cx| {
@@ -2393,6 +2512,7 @@ impl Window {
             handle,
             invalidator,
             removed: false,
+            native_surfaces: platform_window.native_surfaces(),
             platform_window,
             display_id,
             display_observers: SingleSubscriberSet::new(),
@@ -2404,6 +2524,7 @@ impl Window {
             text_rendering_mode: cx.text_rendering_mode.clone(),
             rem_size: px(16.),
             rem_size_override_stack: SmallVec::new(),
+            capture: None,
             viewport_size: content_size,
             layout_engine: Some(TaffyLayoutEngine::new()),
             root: None,
@@ -2413,12 +2534,14 @@ impl Window {
             element_offset_stack: Vec::new(),
             content_mask_stack: Vec::new(),
             element_opacity: 1.0,
+            edge_fade: None,
             requested_autoscroll: None,
             last_text_input_configuration: None,
             focused_text_input: None,
             rendered_frame: Frame::new(DispatchTree::new(cx.keymap.clone(), cx.actions.clone())),
             next_frame: Frame::new(DispatchTree::new(cx.keymap.clone(), cx.actions.clone())),
             next_frame_callbacks,
+            display_frame_requested,
             next_hitbox_id: HitboxId(0),
             next_tooltip_id: TooltipId::default(),
             tooltip_bounds: None,
@@ -2428,6 +2551,7 @@ impl Window {
             focus_lost_path: SmallVec::new(),
             default_prevented: true,
             mouse_position,
+            mouse_exited: false,
             mouse_hit_test: HitTest::default(),
             modifiers,
             capslock,
@@ -2494,13 +2618,26 @@ pub struct DispatchEventResult {
 }
 
 /// Indicates which region of the window is visible. Content falling outside of this mask will not be
-/// rendered. Currently, only rectangular content masks are supported, but we give the mask its own type
-/// to leave room to support more complex shapes in the future.
+/// rendered. A mask is a rectangle with optional corner radii, so a child of a rounded box is clipped
+/// to the shape rather than to its bounding box.
 #[derive(Copy, Clone, Debug, Default, PartialEq, Eq)]
 #[repr(C)]
 pub struct ContentMask<P: Clone + Debug + Default + PartialEq> {
     /// The bounds
     pub bounds: Bounds<P>,
+    /// The corners the mask is rounded at, clipping children to the shape
+    /// rather than to `bounds`. All zero is a plain rectangle.
+    pub corner_radii: Corners<P>,
+}
+
+impl<P: Clone + Debug + Default + PartialEq> ContentMask<P> {
+    /// A plain rectangular mask, the shape every mask had before corners.
+    pub fn new(bounds: Bounds<P>) -> Self {
+        Self {
+            bounds,
+            corner_radii: Corners::default(),
+        }
+    }
 }
 
 impl ContentMask<Pixels> {
@@ -2508,13 +2645,51 @@ impl ContentMask<Pixels> {
     pub fn scale(&self, factor: f32) -> ContentMask<ScaledPixels> {
         ContentMask {
             bounds: self.bounds.scale(factor),
+            corner_radii: self.corner_radii.scale(factor),
         }
     }
 
     /// Intersect the content mask with the given content mask.
+    ///
+    /// Two rounded rectangles do not intersect to a rounded rectangle, so only
+    /// the nested case — one mask wholly inside the other — keeps its corners.
+    /// The inner mask supplies each corner, except where that corner sits on
+    /// the outer mask's own: there the larger radius of the two wins, so a
+    /// rounded mask stays rounded through any square masks nested flush in it.
+    /// A genuine partial overlap of two rounded masks falls back to the square
+    /// intersection rather than inventing a shape.
     pub fn intersect(&self, other: &Self) -> Self {
         let bounds = self.bounds.intersect(&other.bounds);
-        ContentMask { bounds }
+        let corner_radii = if bounds == other.bounds {
+            nested_corners(other, self)
+        } else if bounds == self.bounds {
+            nested_corners(self, other)
+        } else {
+            Corners::default()
+        };
+        ContentMask {
+            bounds,
+            corner_radii,
+        }
+    }
+}
+
+/// The corners of `inner` nested in `outer`, each taking the larger radius
+/// where it coincides with the outer mask's corner.
+fn nested_corners(inner: &ContentMask<Pixels>, outer: &ContentMask<Pixels>) -> Corners<Pixels> {
+    let (i, o) = (&inner.bounds, &outer.bounds);
+    let (ir, or) = (&inner.corner_radii, &outer.corner_radii);
+    let corner = |shared: bool, inner: Pixels, outer: Pixels| match shared {
+        true => inner.max(outer),
+        false => inner,
+    };
+    let (left, right) = (i.left() == o.left(), i.right() == o.right());
+    let (top, bottom) = (i.top() == o.top(), i.bottom() == o.bottom());
+    Corners {
+        top_left: corner(top && left, ir.top_left, or.top_left),
+        top_right: corner(top && right, ir.top_right, or.top_right),
+        bottom_right: corner(bottom && right, ir.bottom_right, or.bottom_right),
+        bottom_left: corner(bottom && left, ir.bottom_left, or.bottom_left),
     }
 }
 
@@ -2721,7 +2896,42 @@ impl Window {
 
     /// Move focus to the element associated with the given [`FocusHandle`].
     pub fn focus(&mut self, handle: &FocusHandle, cx: &mut App) {
-        if !self.focus_enabled || self.focus == Some(handle.id) {
+        if !self.focus_enabled {
+            return;
+        }
+        let native = self
+            .rendered_frame
+            .scene
+            .native_views
+            .iter()
+            .find(|view| {
+                view.focus == Some(handle.id)
+                    && view.interactive
+                    && view.opacity > 0.
+                    && view.state.enabled.get()
+            })
+            .map(|view| view.state.clone());
+        for view in &self.rendered_frame.scene.native_views {
+            if view
+                .state
+                .window
+                .get()
+                .is_none_or(|owner| owner == self.handle.window_id())
+                && native
+                    .as_ref()
+                    .is_none_or(|state| !Rc::ptr_eq(state, &view.state))
+            {
+                view.state
+                    .request_focus(false, Some(self.handle.window_id()));
+            }
+        }
+        if let Some(state) = native {
+            state.request_focus(true, Some(self.handle.window_id()));
+            self.refresh();
+        } else {
+            self.platform_window.focus();
+        }
+        if self.focus == Some(handle.id) {
             return;
         }
 
@@ -2740,6 +2950,18 @@ impl Window {
             return;
         }
 
+        for view in &self.rendered_frame.scene.native_views {
+            if view
+                .state
+                .window
+                .get()
+                .is_none_or(|owner| owner == self.handle.window_id())
+            {
+                view.state
+                    .request_focus(false, Some(self.handle.window_id()));
+            }
+        }
+        self.platform_window.focus();
         if self.focus.is_some() {
             self.focus_generation = self.focus_generation.wrapping_add(1);
         }
@@ -3037,6 +3259,13 @@ impl Window {
         self.invalidator.wake_platform();
     }
 
+    /// Schedule content at the display rate, bypassing inactive-window throttling.
+    /// Thermal throttling still applies.
+    pub fn on_next_display_frame(&self, callback: impl FnOnce(&mut Window, &mut App) + 'static) {
+        self.display_frame_requested.set(true);
+        self.on_next_frame(callback);
+    }
+
     /// Schedule a frame to be drawn on the next animation frame.
     ///
     /// This is useful for elements that need to animate continuously, such as a video player or an animated GIF.
@@ -3066,6 +3295,7 @@ impl Window {
     #[cfg(any(test, feature = "test-support"))]
     pub fn simulate_next_frame(&mut self, cx: &mut App) -> usize {
         let callbacks = self.next_frame_callbacks.take();
+        self.display_frame_requested.set(false);
         let count = callbacks.len();
         for callback in callbacks {
             callback(self, cx);
@@ -3420,6 +3650,16 @@ impl Window {
             .set_background_appearance(background_appearance);
     }
 
+    /// Sets the backdrop blur radius in native filter pixels, without scale conversion.
+    /// Only affects macOS `Blurred` backgrounds; other platforms keep their existing appearance.
+    /// Zero disables blur without changing transparency, tint, or foreground content.
+    /// Negative values become zero; non-finite values are ignored.
+    pub fn set_background_blur(&self, radius: f64) {
+        if radius.is_finite() {
+            self.platform_window.set_background_blur(radius.max(0.0));
+        }
+    }
+
     /// Mark the window as dirty at the platform level.
     pub fn set_window_edited(&mut self, edited: bool) {
         self.platform_window.set_edited(edited);
@@ -3613,6 +3853,7 @@ impl Window {
                         point(start, bounds.top()),
                         point(end, bounds.bottom()),
                     ),
+                    corner_radii: underline.content_mask.corner_radii,
                 },
                 ..underline
             });
@@ -3638,7 +3879,7 @@ impl Window {
             color: style
                 .color
                 .unwrap_or_default()
-                .opacity(self.element_opacity()),
+                .opacity(self.element_opacity_at(origin)),
             thickness: self.snap_stroke(style.thickness),
             wavy: style.wavy.into(),
         }
@@ -3686,6 +3927,7 @@ impl Window {
     fn snapped_content_mask(&self) -> ContentMask<ScaledPixels> {
         ContentMask {
             bounds: self.cover_bounds(self.content_mask().bounds),
+            corner_radii: self.content_mask().corner_radii.scale(self.scale_factor()),
         }
     }
 
@@ -3961,7 +4203,7 @@ impl Window {
     }
 
     #[profiling::function]
-    fn present(&mut self) {
+    pub(crate) fn present(&mut self) {
         #[cfg(feature = "profiler")]
         let _foreground_turn = profiler::journal::foreground_turn();
         #[cfg(feature = "profiler")]
@@ -4097,7 +4339,7 @@ impl Window {
             tooltip_element = self.prepaint_tooltip(cx);
         }
 
-        self.mouse_hit_test = self.next_frame.hit_test(self.mouse_position);
+        self.mouse_hit_test = self.pointer_hit_test(&self.next_frame);
 
         // Now actually paint the elements.
         #[cfg(feature = "profiler")]
@@ -4366,7 +4608,54 @@ impl Window {
         }
     }
 
+    pub(crate) fn can_move_cached_view(
+        &self,
+        prepaint: &Range<PrepaintStateIndex>,
+        paint: &Range<PaintIndex>,
+        previous: Bounds<Pixels>,
+        previous_mask: ContentMask<Pixels>,
+        next: Bounds<Pixels>,
+        next_mask: ContentMask<Pixels>,
+    ) -> bool {
+        let delta = (next.origin - previous.origin).scale(self.scale_factor());
+        previous.size == next.size
+            && previous_mask.corner_radii == Corners::default()
+            && next_mask.corner_radii == Corners::default()
+            && previous_mask.bounds.intersect(&previous) == previous
+            && next_mask.bounds.intersect(&next) == next
+            && delta.x.0.fract() == 0.
+            && delta.y.0.fract() == 0.
+            && prepaint.start.hitboxes_index == prepaint.end.hitboxes_index
+            && prepaint.start.tooltips_index == prepaint.end.tooltips_index
+            && prepaint.start.deferred_draws_index == prepaint.end.deferred_draws_index
+            && paint.start.mouse_listeners_index == paint.end.mouse_listeners_index
+            && paint.start.input_handlers_index == paint.end.input_handlers_index
+            && paint.start.cursor_styles_index == paint.end.cursor_styles_index
+            && paint.start.tab_handle_index == paint.end.tab_handle_index
+            && self
+                .rendered_frame
+                .scene
+                .can_translate(paint.start.scene_index..paint.end.scene_index)
+    }
+
     pub(crate) fn reuse_prepaint(&mut self, range: Range<PrepaintStateIndex>) {
+        let next = self.prepaint_index();
+        let mut rebased = FxHashSet::default();
+        for key in &self.rendered_frame.accessed_element_states
+            [range.start.accessed_element_states_index..range.end.accessed_element_states_index]
+        {
+            if key.1 == TypeId::of::<ViewElementState>() && rebased.insert(key) {
+                if let Some(state) = self
+                    .rendered_frame
+                    .element_states
+                    .get_mut(key)
+                    .and_then(|state| state.inner.downcast_mut::<Option<ViewElementState>>())
+                    .and_then(Option::as_mut)
+                {
+                    state.rebase_prepaint(&range.start, &next);
+                }
+            }
+        }
         self.next_frame.hitboxes.extend(
             self.rendered_frame.hitboxes[range.start.hitboxes_index..range.end.hitboxes_index]
                 .iter()
@@ -4433,13 +4722,40 @@ impl Window {
     }
 
     pub(crate) fn reuse_paint(&mut self, range: Range<PaintIndex>) {
+        self.reuse_paint_translated(range, Point::default());
+    }
+
+    pub(crate) fn reuse_paint_translated(
+        &mut self,
+        range: Range<PaintIndex>,
+        offset: Point<Pixels>,
+    ) {
+        let next = self.paint_index();
+        let mut rebased = FxHashSet::default();
+        for key in &self.rendered_frame.accessed_element_states
+            [range.start.accessed_element_states_index..range.end.accessed_element_states_index]
+        {
+            if key.1 == TypeId::of::<ViewElementState>() && rebased.insert(key) {
+                if let Some(state) = self
+                    .rendered_frame
+                    .element_states
+                    .get_mut(key)
+                    .and_then(|state| state.inner.downcast_mut::<Option<ViewElementState>>())
+                    .and_then(Option::as_mut)
+                {
+                    state.rebase_paint(&range.start, &next, offset);
+                }
+            }
+        }
         // Cached elements still exist in the frame even when their paint methods don't run.
         #[cfg(any(test, feature = "test-support"))]
         for (selector, bounds) in &self.rendered_frame.debug_bounds_records
             [range.start.debug_bounds_index..range.end.debug_bounds_index]
         {
-            self.next_frame
-                .record_debug_bounds(selector.clone(), *bounds);
+            self.next_frame.record_debug_bounds(
+                selector.clone(),
+                Bounds::new(bounds.origin + offset, bounds.size),
+            );
         }
         self.next_frame.cursor_styles.extend(
             self.rendered_frame.cursor_styles
@@ -4472,9 +4788,10 @@ impl Window {
 
         self.text_system
             .reuse_layouts(range.start.line_layout_index..range.end.line_layout_index);
-        self.next_frame.scene.replay(
+        self.next_frame.scene.replay_translated(
             range.start.scene_index..range.end.scene_index,
             &self.rendered_frame.scene,
+            offset.scale(self.scale_factor()),
         );
     }
 
@@ -4601,6 +4918,31 @@ impl Window {
         result
     }
 
+    /// Executes the provided function with a vertical [`EdgeFade`] applied:
+    /// every primitive painted inside is additionally faded by its vertical
+    /// position — full alpha in the region's body, ramping to zero across
+    /// `fade.band` at each active edge. Granularity is per-primitive (each
+    /// quad/glyph/sprite takes the ramp value at its own position), which
+    /// reads as a smooth gradient for text and small marks.
+    /// Apply the same scope during prepaint and paint when it contains cached views.
+    pub fn with_edge_fade<R>(
+        &mut self,
+        fade: Option<EdgeFade>,
+        f: impl FnOnce(&mut Self) -> R,
+    ) -> R {
+        let Some(fade) = fade else {
+            return f(self);
+        };
+        if !(fade.top || fade.bottom || fade.left || fade.right) {
+            return f(self);
+        }
+        self.invalidator.debug_assert_paint_or_prepaint();
+        let previous = self.edge_fade.replace(fade);
+        let result = f(self);
+        self.edge_fade = previous;
+        result
+    }
+
     /// Perform prepaint on child elements in a "retryable" manner, so that any side effects
     /// of prepaints can be discarded before prepainting again. This is used to support autoscroll
     /// where we need to prepaint children to detect the autoscroll bounds, then adjust the
@@ -4681,18 +5023,152 @@ impl Window {
         self.element_opacity
     }
 
+    /// The element opacity at a position (window coords): the scoped uniform
+    /// opacity times the [`EdgeFade`] ramp evaluated at `center`.
+    #[inline]
+    pub(crate) fn element_opacity_at(&self, center: Point<Pixels>) -> f32 {
+        let opacity = self.element_opacity();
+        let Some(fade) = &self.edge_fade else {
+            return opacity;
+        };
+        let band = fade.band.0.max(1.0);
+        let mut ramp: f32 = 1.0;
+        if fade.top {
+            ramp = ramp.min(((center.y.0 - fade.bounds.top().0) / band).clamp(0.0, 1.0));
+        }
+        if fade.bottom {
+            ramp = ramp.min(((fade.bounds.bottom().0 - center.y.0) / band).clamp(0.0, 1.0));
+        }
+        if fade.left {
+            ramp = ramp.min(((center.x.0 - fade.bounds.left().0) / band).clamp(0.0, 1.0));
+        }
+        if fade.right {
+            ramp = ramp.min(((fade.bounds.right().0 - center.x.0) / band).clamp(0.0, 1.0));
+        }
+        opacity * ramp
+    }
+
+    /// The element opacity for a primitive covering `bounds`: the scoped
+    /// uniform opacity times the [`EdgeFade`] ramp at the bounds' NEAREST
+    /// point to each active edge. Conservative on purpose — a sprite reaches
+    /// zero exactly as its leading edge touches the region boundary, so the
+    /// clip can never slice a visible glyph (center sampling left dim-but-
+    /// sliced glyphs at the edge).
+    #[inline]
+    pub(crate) fn element_opacity_for_bounds(&self, bounds: &Bounds<Pixels>) -> f32 {
+        let opacity = self.element_opacity();
+        let Some(fade) = &self.edge_fade else {
+            return opacity;
+        };
+        let band = fade.band.0.max(1.0);
+        let mut ramp: f32 = 1.0;
+        if fade.top {
+            ramp = ramp.min(((bounds.top().0 - fade.bounds.top().0) / band).clamp(0.0, 1.0));
+        }
+        if fade.bottom {
+            ramp = ramp.min(((fade.bounds.bottom().0 - bounds.bottom().0) / band).clamp(0.0, 1.0));
+        }
+        if fade.left {
+            ramp = ramp.min(((bounds.left().0 - fade.bounds.left().0) / band).clamp(0.0, 1.0));
+        }
+        if fade.right {
+            ramp = ramp.min(((fade.bounds.right().0 - bounds.right().0) / band).clamp(0.0, 1.0));
+        }
+        opacity * ramp
+    }
+
+    /// Per-pixel [`EdgeFade`] for quads: a SOLID background on a quad that
+    /// crosses an active fade ramp is rewritten as a linear gradient whose
+    /// stops sit AT the band boundary in quad space (the shader clamps `t`
+    /// outside the stop range), so the piecewise ramp renders exactly and the
+    /// GPU interpolates per pixel — uniform per-primitive alpha visibly
+    /// popped/clipped on anything wider than the band (tab washes, row
+    /// selections). `None` = no rewrite applies; callers fall back to the
+    /// center-point alpha.
+    fn quad_fade_gradient(
+        &self,
+        bounds: Bounds<Pixels>,
+        background: &Background,
+    ) -> Option<Background> {
+        let fade = self.edge_fade.as_ref()?;
+        if background.tag != crate::color::BackgroundTag::Solid {
+            return None;
+        }
+        let horizontal = fade.left || fade.right;
+        let vertical = fade.top || fade.bottom;
+        if horizontal == vertical {
+            return None;
+        }
+        let band = fade.band.0.max(1.0);
+        let (lo, hi, edge_lo, edge_hi, fade_lo, fade_hi, angle) = if horizontal {
+            (
+                bounds.left().0,
+                bounds.right().0,
+                fade.bounds.left().0,
+                fade.bounds.right().0,
+                fade.left,
+                fade.right,
+                90.0,
+            )
+        } else {
+            (
+                bounds.top().0,
+                bounds.bottom().0,
+                fade.bounds.top().0,
+                fade.bounds.bottom().0,
+                fade.top,
+                fade.bottom,
+                180.0,
+            )
+        };
+        let extent = (hi - lo).max(1.0);
+        let in_lo_band = fade_lo && lo < edge_lo + band;
+        let in_hi_band = fade_hi && hi > edge_hi - band;
+        let base = self.element_opacity();
+        let color = background.solid;
+        // Anchor both stops INSIDE the band segment, clamped to the quad: the
+        // ramp's zero must sit at the REGION edge (v = edge), not the quad
+        // edge — anchoring at a partially-scrolled-out quad's own edge left
+        // its visible part nonzero at the clip line (user report). The shader
+        // clamps t outside the stop range, extending both plateaus exactly.
+        let (v0, v1, a0, a1) = match (in_lo_band, in_hi_band) {
+            // A quad spanning BOTH bands can't be expressed with two stops;
+            // no variation at all needs no gradient.
+            (true, true) | (false, false) => return None,
+            (true, false) => {
+                let v0 = lo.max(edge_lo);
+                let v1 = hi.min(edge_lo + band);
+                let ramp = |v: f32| ((v - edge_lo) / band).clamp(0.0, 1.0);
+                (v0, v1, ramp(v0), ramp(v1))
+            }
+            (false, true) => {
+                let v0 = lo.max(edge_hi - band);
+                let v1 = hi.min(edge_hi);
+                let ramp = |v: f32| ((edge_hi - v) / band).clamp(0.0, 1.0);
+                (v0, v1, ramp(v0), ramp(v1))
+            }
+        };
+        let p0 = (v0 - lo) / extent;
+        let p1 = (v1 - lo) / extent;
+        if (p1 - p0) < 0.001 {
+            return None;
+        }
+        Some(crate::linear_gradient(
+            angle,
+            crate::linear_color_stop(color.opacity(a0 * base), p0),
+            crate::linear_color_stop(color.opacity(a1 * base), p1),
+        ))
+    }
+
     /// Obtain the current content mask. This method should only be called during element drawing.
     pub fn content_mask(&self) -> ContentMask<Pixels> {
         self.invalidator.debug_assert_paint_or_prepaint();
-        self.content_mask_stack
-            .last()
-            .cloned()
-            .unwrap_or_else(|| ContentMask {
-                bounds: Bounds {
-                    origin: Point::default(),
-                    size: self.viewport_size,
-                },
+        self.content_mask_stack.last().cloned().unwrap_or_else(|| {
+            ContentMask::new(Bounds {
+                origin: Point::default(),
+                size: self.viewport_size,
             })
+        })
     }
 
     /// Provide elements in the called function with a new namespace in which their identifiers must be unique.
@@ -4928,11 +5404,40 @@ impl Window {
         corner_radii: Corners<Pixels>,
         shadows: &[BoxShadow],
     ) {
+        self.drop_shadows(bounds, corner_radii, shadows, false);
+    }
+
+    /// The same, with the element's own shape cut out of it.
+    ///
+    /// A plain drop shadow paints under its element as well as around it, which
+    /// nothing notices while an opaque fill covers the middle. A surface whose
+    /// fill arrives in a later pass — liquid glass — has no such cover, and the
+    /// shadow reads as a slab across it.
+    ///
+    /// This method should only be called as part of the paint phase of element drawing.
+    pub fn paint_drop_shadows_outside(
+        &mut self,
+        bounds: Bounds<Pixels>,
+        corner_radii: Corners<Pixels>,
+        shadows: &[BoxShadow],
+    ) {
+        self.drop_shadows(bounds, corner_radii, shadows, true);
+    }
+
+    fn drop_shadows(
+        &mut self,
+        bounds: Bounds<Pixels>,
+        corner_radii: Corners<Pixels>,
+        shadows: &[BoxShadow],
+        outside: bool,
+    ) {
         self.invalidator.debug_assert_paint();
 
         let scale_factor = self.scale_factor();
         let content_mask = self.snapped_content_mask();
-        let opacity = self.element_opacity();
+        let opacity = self.element_opacity_for_bounds(&bounds);
+        let element_bounds = self.cover_bounds(bounds);
+        let element_corner_radii = corner_radii.scale(scale_factor);
         for shadow in shadows {
             if shadow.inset {
                 continue;
@@ -4952,8 +5457,10 @@ impl Window {
                 corner_radii: Corners::default(),
                 color: shadow.color.opacity(opacity),
                 shape_bounds,
-                shape_corner_radii: corner_radii.scale(scale_factor),
-                inset: false.into(),
+                shape_corner_radii: element_corner_radii,
+                element_bounds,
+                element_corner_radii,
+                inset: if outside { 2 } else { 0 },
                 pad: 0,
             });
         }
@@ -4972,7 +5479,7 @@ impl Window {
 
         let scale_factor = self.scale_factor();
         let content_mask = self.snapped_content_mask();
-        let opacity = self.element_opacity();
+        let opacity = self.element_opacity_for_bounds(&bounds);
         let element_bounds = self.cover_bounds(bounds);
         let element_corner_radii = corner_radii.scale(scale_factor);
         for shadow in shadows {
@@ -4998,10 +5505,74 @@ impl Window {
                 color: shadow.color.opacity(opacity),
                 shape_bounds: self.cover_bounds(hole),
                 shape_corner_radii: hole_corner_radii.scale(scale_factor),
-                inset: true.into(),
+                element_bounds,
+                element_corner_radii,
+                inset: 1,
                 pad: 0,
             });
         }
+    }
+
+    /// Paint a within-window backdrop blur: everything already painted
+    /// beneath `bounds` is snapshotted and painted back through [`GlassEffect`]
+    /// inside the rounded rect. Metal and wgpu implement it; a renderer without
+    /// it ignores the call, so callers keep a fill of their own.
+    /// Content painted AFTER this call composites on top.
+    pub fn paint_backdrop_blur(
+        &mut self,
+        bounds: Bounds<Pixels>,
+        corner_radii: Corners<Pixels>,
+        glass: GlassEffect,
+    ) {
+        self.invalidator.debug_assert_paint();
+        let scale_factor = self.scale_factor();
+        let content_mask = self.content_mask().scale(scale_factor);
+        // A radius past half the box makes `quad_sdf` read every fragment as
+        // outside, and the whole region discards — a `rounded_full` pill would
+        // paint no glass at all.
+        let limit = bounds.size.width.min(bounds.size.height) / 2.;
+        let corner_radii = Corners {
+            top_left: corner_radii.top_left.min(limit),
+            top_right: corner_radii.top_right.min(limit),
+            bottom_right: corner_radii.bottom_right.min(limit),
+            bottom_left: corner_radii.bottom_left.min(limit),
+        };
+        // Invisible splitter primitive: forces a batch boundary at this order
+        // so the renderer can break its render pass exactly here.
+        self.next_frame.scene.insert_primitive(Shadow {
+            order: 0,
+            blur_radius: ScaledPixels(0.),
+            bounds: bounds.scale(scale_factor),
+            corner_radii: corner_radii.scale(scale_factor),
+            content_mask,
+            color: crate::transparent_black(),
+            shape_bounds: bounds.scale(scale_factor),
+            shape_corner_radii: corner_radii.scale(scale_factor),
+            element_bounds: bounds.scale(scale_factor),
+            element_corner_radii: corner_radii.scale(scale_factor),
+            inset: 0,
+            pad: 0,
+        });
+        self.next_frame.scene.insert_backdrop_blur(BackdropBlur {
+            order: 0,
+            blur_radius: glass.blur_radius.scale(scale_factor),
+            bounds: bounds.scale(scale_factor),
+            content_mask,
+            corner_radii: corner_radii.scale(scale_factor),
+            lens: glass.lens.scale(scale_factor),
+            reach: glass.reach.scale(scale_factor),
+            magnify: glass.magnify,
+            dispersion: glass.dispersion,
+            gain: glass.gain,
+            saturation: glass.saturation,
+            tint: glass.tint,
+            edge: glass.edge,
+            edge_width: glass.edge_width.scale(scale_factor),
+            edge_aa: glass.edge_aa.scale(scale_factor),
+            // Read here rather than taken from the caller: a material inside a
+            // fading tree is faded by the tree, like every other primitive.
+            opacity: self.element_opacity_for_bounds(&bounds),
+        });
     }
 
     fn largest_border_interior(quad: &Quad) -> Bounds<ScaledPixels> {
@@ -5058,14 +5629,17 @@ impl Window {
     pub fn paint_quad(&mut self, quad: PaintQuad) {
         self.invalidator.debug_assert_paint();
 
-        let opacity = self.element_opacity();
+        let opacity = self.element_opacity_at(quad.bounds.center());
+        let background = self
+            .quad_fade_gradient(quad.bounds, &quad.background)
+            .unwrap_or_else(|| quad.background.opacity(opacity));
         let snapped_bounds = self.snap_bounds(quad.bounds);
         let snapped_border_widths = self.snap_border_widths(quad.border_widths);
         let quad = Quad {
             order: 0,
             bounds: snapped_bounds,
             content_mask: self.snapped_content_mask(),
-            background: quad.background.opacity(opacity),
+            background,
             border_color: quad.border_color.opacity(opacity),
             corner_radii: quad.corner_radii.scale(self.scale_factor()),
             border_widths: snapped_border_widths,
@@ -5122,9 +5696,7 @@ impl Window {
 
         if has_background {
             self.next_frame.scene.insert_primitive(Quad {
-                content_mask: ContentMask {
-                    bounds: quad.content_mask.bounds.intersect(&inner_bounds),
-                },
+                content_mask: ContentMask::new(quad.content_mask.bounds.intersect(&inner_bounds)),
                 border_widths: Edges::default(),
                 corner_radii: Corners::default(),
                 ..quad
@@ -5155,12 +5727,16 @@ impl Window {
         ];
 
         for strip in strips {
-            self.next_frame.scene.insert_primitive(Quad {
-                content_mask: ContentMask {
-                    bounds: quad.content_mask.bounds.intersect(&strip),
-                },
-                ..strip_quad
-            });
+            let content_mask_bounds = quad.content_mask.bounds.intersect(&strip);
+            if !content_mask_bounds.is_empty() {
+                // Square: a strip is a sub-rect of the mask, so keeping the
+                // radii would test them against the wrong rectangle. A shadow
+                // cut out inside a rounded mask loses the curve, nothing else.
+                self.next_frame.scene.insert_primitive(Quad {
+                    content_mask: ContentMask::new(content_mask_bounds),
+                    ..quad
+                });
+            }
         }
     }
 
@@ -5172,14 +5748,13 @@ impl Window {
 
         let scale_factor = self.scale_factor();
         let content_mask = self.content_mask();
-        let opacity = self.element_opacity();
-        let color: Background = color.into();
-        self.next_frame.scene.insert_primitive(PaintedPath::new(
-            path,
-            scale_factor,
-            content_mask,
-            color.opacity(opacity),
-        ));
+        let mut path = PaintedPath::new(path, scale_factor, content_mask, color.into());
+        let bounds = path.bounds.map(|value| px(value.0 / scale_factor));
+        path.paint.color = path
+            .paint
+            .color
+            .opacity(self.element_opacity_for_bounds(&bounds));
+        self.next_frame.scene.insert_primitive(path);
     }
 
     /// Paint an underline into the scene for the next frame at the current z-index.
@@ -5213,7 +5788,7 @@ impl Window {
             origin: origin.map(|c| ScaledPixels(round_to_device_pixel(c.0, scale_factor))),
             size: size(self.snap_stroke(width), self.snap_stroke(height)),
         };
-        let opacity = self.element_opacity();
+        let opacity = self.element_opacity_at(origin);
 
         self.next_frame.scene.insert_primitive(Underline {
             order: 0,
@@ -5244,7 +5819,10 @@ impl Window {
     ) -> Result<()> {
         self.invalidator.debug_assert_paint();
 
-        let element_opacity = self.element_opacity();
+        let element_opacity = self.element_opacity_for_bounds(&Bounds {
+            origin,
+            size: size(font_size * 0.6, font_size),
+        });
         let scale_factor = self.scale_factor();
         let glyph_origin = origin.scale(scale_factor);
 
@@ -5379,7 +5957,10 @@ impl Window {
                 size: tile.bounds.size.map(Into::into),
             };
             let content_mask = self.snapped_content_mask();
-            let opacity = self.element_opacity();
+            let opacity = self.element_opacity_for_bounds(&Bounds {
+                origin,
+                size: size(font_size * 0.6, font_size),
+            });
 
             self.next_frame.scene.insert_primitive(PolychromeSprite {
                 order: 0,
@@ -5424,7 +6005,7 @@ impl Window {
     ) -> Result<()> {
         self.invalidator.debug_assert_paint();
 
-        let element_opacity = self.element_opacity();
+        let element_opacity = self.element_opacity_for_bounds(&bounds);
         let bounds = self.snap_bounds(bounds);
 
         let params = RenderSvgParams {
@@ -5458,9 +6039,17 @@ impl Window {
                 .size
                 .map(|value| ScaledPixels(value.0 as f32 / SMOOTH_SVG_SCALE_FACTOR)),
         };
+        // Down, never up. `to_tile_position` maps this quad's unit square onto
+        // the whole tile whatever size the quad is, so a quad rounded past
+        // `tile / SMOOTH_SVG_SCALE_FACTOR` puts its outermost sample past the
+        // tile's edge — and tiles are packed edge to edge, so what it reads
+        // there is the glyph allocated next to it. At or under that size every
+        // sample falls at texel 0.5 or further in.
         let final_bounds = svg_bounds
             .map_origin(|value| ScaledPixels(round_half_toward_zero(value.0)))
-            .map_size(|size| size.ceil());
+            // A tile of one texel still has to paint: at one pixel the only
+            // sample lands at texel 0.5, which is inside it.
+            .map_size(|size| ScaledPixels(size.0.floor().max(1.)));
 
         let sprite = MonochromeSprite {
             order: 0,
@@ -5501,6 +6090,7 @@ impl Window {
     ) -> Result<()> {
         self.invalidator.debug_assert_paint();
 
+        let fade_bounds = bounds;
         let visible_bounds = bounds.intersect(&image_bounds);
         if visible_bounds.size.width <= Pixels::ZERO || visible_bounds.size.height <= Pixels::ZERO {
             return Ok(());
@@ -5509,10 +6099,7 @@ impl Window {
             return Ok(());
         }
 
-        let params = RenderImageParams {
-            image_id: data.id,
-            frame_index,
-        };
+        let params = RenderImageParams::from((&*data, frame_index));
 
         let tile = self
             .sprite_atlas
@@ -5573,7 +6160,7 @@ impl Window {
         let corner_radii = corner_radii
             .clamp_radii_for_quad_size(visible_bounds.size)
             .scale(self.scale_factor());
-        let opacity = self.element_opacity();
+        let opacity = self.element_opacity_for_bounds(&fade_bounds);
 
         self.next_frame.scene.insert_primitive(PolychromeSprite {
             order: 0,
@@ -5611,13 +6198,66 @@ impl Window {
         });
     }
 
+    /// The view keeps a fixed logical viewport while `bounds` sets its displayed
+    /// size. `hitbox` must belong to this frame; later hitboxes occlude native input.
+    pub fn paint_native_view(
+        &mut self,
+        mut view: NativeView,
+        bounds: Bounds<Pixels>,
+        focus: Option<&FocusHandle>,
+        hitbox: &Hitbox,
+    ) -> Result<()> {
+        self.invalidator.debug_assert_paint();
+        anyhow::ensure!(
+            self.native_surfaces.views,
+            "native view composition is unavailable"
+        );
+        view.focus = focus.map(|focus| focus.id);
+        view.window = Some(self.handle.window_id());
+        view.bounds = self.snap_bounds(bounds);
+        view.content_mask = self.snapped_content_mask();
+        view.opacity = self.element_opacity_for_bounds(&bounds);
+        view.hitbox = Some(hitbox.id);
+        self.next_frame.scene.insert_native_view(view);
+        Ok(())
+    }
+
+    /// Paints foreground inside a native material's content host.
+    pub fn paint_native_material<R>(
+        &mut self,
+        id: &GlobalElementId,
+        state: &MaterialState,
+        style: MaterialStyle,
+        bounds: Bounds<Pixels>,
+        paint: impl FnOnce(&mut Self) -> R,
+    ) -> Result<R> {
+        self.invalidator.debug_assert_paint();
+        anyhow::ensure!(
+            self.native_surfaces.materials,
+            "native materials are unavailable"
+        );
+        self.next_frame.scene.begin_native_material(NativeMaterial {
+            id: id.clone(),
+            state: state.clone(),
+            style,
+            bounds: self.snap_bounds(bounds),
+            content_mask: self.snapped_content_mask(),
+            opacity: self.element_opacity,
+            order: 0,
+            end_order: 0,
+            parent: None,
+        });
+        let opacity = std::mem::replace(&mut self.element_opacity, 1.);
+        let result = paint(self);
+        self.element_opacity = opacity;
+        self.next_frame.scene.end_native_material();
+        Ok(result)
+    }
+
     /// Removes an image from the sprite atlas.
     pub fn drop_image(&mut self, data: Arc<RenderImage>) -> Result<()> {
         for frame_index in 0..data.frame_count() {
-            let params = RenderImageParams {
-                image_id: data.id,
-                frame_index,
-            };
+            let params = RenderImageParams::from((&*data, frame_index));
 
             self.sprite_atlas.remove(&params.into());
         }
@@ -5630,14 +6270,46 @@ impl Window {
     pub fn has_image_atlas_entry(&self, data: &RenderImage) -> bool {
         data.frame_count() > 0
             && (0..data.frame_count()).all(|frame_index| {
-                self.sprite_atlas.contains(
-                    &RenderImageParams {
-                        image_id: data.id,
-                        frame_index,
-                    }
-                    .into(),
-                )
+                self.sprite_atlas
+                    .contains(&RenderImageParams::from((data, frame_index)).into())
             })
+    }
+
+    /// Update an existing image tile. Completion follows the atlas's GPU-read
+    /// lifetime contract, including errors and absent tiles.
+    pub fn update_image(
+        &mut self,
+        data: &RenderImage,
+        frame_index: usize,
+        region: Bounds<DevicePixels>,
+        update: crate::external_image::AtlasTileUpdate<'_>,
+        complete: Option<Box<dyn FnOnce() + Send>>,
+    ) -> Result<bool> {
+        self.sprite_atlas.update_tile(
+            &RenderImageParams::from((data, frame_index)).into(),
+            region,
+            update,
+            complete,
+        )
+    }
+
+    /// Ensure an external image's tile exists; `true` requires a complete frame
+    /// before damage-only updates can resume.
+    pub fn insert_blank_image(&mut self, data: &RenderImage, frame_index: usize) -> Result<bool> {
+        let key = RenderImageParams::from((data, frame_index)).into();
+        let size = data.size(frame_index);
+        if let Some(created) = self.sprite_atlas.insert_blank(&key, size)? {
+            return Ok(created);
+        }
+        let bytes = data
+            .as_bytes(frame_index)
+            .context("external image has no frame")?;
+        let mut created = false;
+        self.sprite_atlas.get_or_insert_with(key, &mut || {
+            created = true;
+            Ok(Some((size, Cow::Borrowed(bytes))))
+        })?;
+        Ok(created)
     }
 
     /// Add a node to the layout tree for the current frame. Takes the `Style` of the element for which
@@ -6018,6 +6690,7 @@ impl Window {
                 keystroke: keystroke.clone(),
                 is_held: false,
                 prefer_character_input: false,
+                layout: None,
             }),
             cx,
         );
@@ -6190,6 +6863,18 @@ impl Window {
             }
             PlatformInput::KeyDown(_) | PlatformInput::KeyUp(_) => event,
         };
+
+        match &event {
+            PlatformInput::MouseExited(_) => self.mouse_exited = true,
+            PlatformInput::MouseMove(_)
+            | PlatformInput::MouseDown(_)
+            | PlatformInput::MouseUp(_)
+            | PlatformInput::Scroll(_)
+            | PlatformInput::Pinch(_)
+            | PlatformInput::LongPress(_)
+            | PlatformInput::TouchDrag(_) => self.mouse_exited = false,
+            _ => {}
+        }
 
         if let Some(any_mouse_event) = event.mouse_event() {
             self.dispatch_mouse_event(any_mouse_event, cx);
@@ -6400,8 +7085,20 @@ impl Window {
         });
     }
 
+    fn pointer_hit_test(&self, frame: &Frame) -> HitTest {
+        if self.mouse_exited {
+            HitTest::default()
+        } else {
+            frame.hit_test(self.mouse_position)
+        }
+    }
+
     fn dispatch_mouse_event(&mut self, event: &dyn Any, cx: &mut App) {
-        self.mouse_hit_test = self.rendered_frame.hit_test(self.mouse_position());
+        let hit_test = self.pointer_hit_test(&self.rendered_frame);
+        if hit_test != self.mouse_hit_test {
+            self.mouse_hit_test = hit_test;
+            self.reset_cursor_style(cx);
+        }
 
         #[cfg(any(feature = "inspector", debug_assertions))]
         if self.is_inspector_picking(cx) {
@@ -6912,6 +7609,7 @@ impl Window {
                 keystroke: replay.keystroke.clone(),
                 is_held: false,
                 prefer_character_input: true,
+                layout: None,
             };
 
             cx.propagate_event = true;
@@ -7407,6 +8105,14 @@ impl Window {
     /// Currently returns None on Mac and Windows.
     pub fn gpu_specs(&self) -> Option<GpuSpecs> {
         self.platform_window.gpu_specs()
+    }
+
+    /// How long the GPU has spent on this window's frames since it opened — a
+    /// counter to take differences of, like the CPU time `getrusage` reports.
+    /// It lags the frame being drawn now, which the renderer submits rather
+    /// than waits on. `None` on every backend but Metal.
+    pub fn gpu_time(&self) -> Option<Duration> {
+        self.platform_window.gpu_time()
     }
 
     /// Perform titlebar double-click action.
@@ -8479,9 +9185,9 @@ mod tests {
     #[cfg(feature = "profiler")]
     #[gpui::test]
     fn test_frame_requests_and_skips_are_journaled(cx: &mut TestAppContext) {
-        use crate::FrameRequestSource;
-        use crate::profiler::journal::{
-            self, ForegroundJournalEntry, FrameSkipReason, IntervalBoundary,
+        use crate::{
+            FrameRequestSource,
+            profiler::journal::{self, ForegroundJournalEntry, FrameSkipReason, IntervalBoundary},
         };
         use scheduler::Instant;
 
@@ -9684,6 +10390,7 @@ mod tests {
                     keystroke: Keystroke::parse("down").expect("valid keystroke"),
                     is_held: false,
                     prefer_character_input: false,
+                    layout: None,
                 }),
                 cx,
             );
@@ -10299,9 +11006,10 @@ mod tests {
             let scale = window.scale_factor();
             let original_mask = window.content_mask();
             let original_opacity = window.element_opacity();
-            let mask = ContentMask {
-                bounds: Bounds::from_corners(point(px(4.), px(10.)), point(px(16.), px(12.))),
-            };
+            let mask = ContentMask::new(Bounds::from_corners(
+                point(px(4.), px(10.)),
+                point(px(16.), px(12.)),
+            ));
             let style = UnderlineStyle {
                 thickness: px(2.),
                 color: Some(hsla(0.25, 0.5, 0.75, 0.5)),
@@ -10444,12 +11152,12 @@ mod tests {
             canvas(
                 |_, _, _| {},
                 move |_, _, window, _| {
-                    window.content_mask_stack.push(ContentMask {
-                        bounds: Bounds::from_corners(
+                    window
+                        .content_mask_stack
+                        .push(ContentMask::new(Bounds::from_corners(
                             point(px(-1000.), px(-1000.)),
                             point(px(1000.), px(1000.)),
-                        ),
-                    });
+                        )));
                     paint(window);
                     window.content_mask_stack.pop();
                 },
@@ -10982,3 +11690,7 @@ mod inspector_tests {
         .expect("closed inspector has no bookkeeping and no style overrides");
     }
 }
+
+#[cfg(test)]
+#[path = "../tests/window_background/tests.rs"]
+mod window_background_tests;

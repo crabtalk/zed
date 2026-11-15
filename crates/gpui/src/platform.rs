@@ -1769,6 +1769,46 @@ pub trait PlatformAtlas {
     ) -> Result<Option<AtlasTile>>;
     fn remove(&self, key: &AtlasKey);
 
+    /// Returns whether a new, uninitialized tile was allocated. `None` means
+    /// this backend does not support external image updates.
+    fn insert_blank(&self, _key: &AtlasKey, _size: Size<DevicePixels>) -> Result<Option<bool>> {
+        Ok(None)
+    }
+
+    /// Queue an ordered update in tile-local device pixels. Completion runs
+    /// exactly once, outside atlas locks, after earlier reads have finished,
+    /// including when this update is rejected. `false` means the tile is absent.
+    fn update_tile(
+        &self,
+        _key: &AtlasKey,
+        _region: Bounds<DevicePixels>,
+        _update: crate::external_image::AtlasTileUpdate<'_>,
+        complete: Option<Box<dyn FnOnce() + Send>>,
+    ) -> Result<bool> {
+        if let Some(complete) = complete {
+            complete();
+        }
+        Ok(false)
+    }
+
+    #[cfg(target_os = "windows")]
+    fn shared_texture_adapter(&self) -> Option<crate::external_image::DxgiAdapterId> {
+        None
+    }
+
+    #[cfg(target_os = "linux")]
+    fn dmabuf_target(&self) -> Option<crate::external_image::DmabufTarget> {
+        None
+    }
+
+    #[cfg(target_os = "linux")]
+    fn import_dmabuf(
+        &self,
+        _buffer: &crate::external_image::Dmabuf<'_>,
+    ) -> Result<crate::external_image::DmabufImport> {
+        anyhow::bail!("this renderer cannot import DMA-BUFs")
+    }
+
     #[cfg(any(test, feature = "test-support", feature = "bench-support"))]
     fn contains(&self, _key: &AtlasKey) -> bool {
         false
@@ -1789,7 +1829,7 @@ pub trait AtlasBackend {
 
 #[doc(hidden)]
 pub struct AtlasState<Backend> {
-    tiles_by_key: FxHashMap<AtlasKey, AtlasTile>,
+    pub tiles_by_key: FxHashMap<AtlasKey, AtlasTile>,
     pub backend: Backend,
 }
 

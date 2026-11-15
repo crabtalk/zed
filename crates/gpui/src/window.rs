@@ -1296,7 +1296,8 @@ pub struct Window {
     pub(crate) display_observers: SubscriberSet<(), AnyObserver>,
     is_resizable: bool,
     is_minimizable: bool,
-    sprite_atlas: Arc<dyn PlatformAtlas>,
+    /// External producers use this atlas for import and capability negotiation.
+    pub sprite_atlas: Arc<dyn PlatformAtlas>,
     text_system: Arc<WindowTextSystem>,
     text_rendering_mode: Rc<Cell<TextRenderingMode>>,
     rem_size: Pixels,
@@ -1328,6 +1329,7 @@ pub struct Window {
     pub(crate) next_tooltip_id: TooltipId,
     pub(crate) tooltip_bounds: Option<TooltipBounds>,
     pub(crate) next_frame_callbacks: Rc<RefCell<Vec<FrameCallback>>>,
+    display_frame_requested: Rc<Cell<bool>>,
     pub(crate) dirty_views: FxHashSet<EntityId>,
     focus_listeners: SubscriberSet<(), AnyWindowFocusListener>,
     pub(crate) focus_lost_listeners: SubscriberSet<(), AnyObserver>,
@@ -1760,6 +1762,7 @@ impl Window {
         let hovered = Rc::new(Cell::new(platform_window.is_hovered()));
         let needs_present = Rc::new(Cell::new(false));
         let next_frame_callbacks: Rc<RefCell<Vec<FrameCallback>>> = Default::default();
+        let display_frame_requested = Rc::new(Cell::new(false));
         let input_rate_tracker = Rc::new(RefCell::new(InputRateTracker::default()));
         let last_frame_time = Rc::new(Cell::new(None));
 
@@ -1876,6 +1879,7 @@ impl Window {
             let active = active.clone();
             let needs_present = needs_present.clone();
             let next_frame_callbacks = next_frame_callbacks.clone();
+            let display_frame_requested = display_frame_requested.clone();
             let input_rate_tracker = input_rate_tracker.clone();
             let mut deferred_force_render = false;
             move |request_frame_options| {
@@ -1931,7 +1935,10 @@ impl Window {
                         && next_frame_callbacks.borrow().is_empty())
                 {
                     None
-                } else if !active.get() && !input_rate_tracker.borrow_mut().is_high_rate() {
+                } else if !active.get()
+                    && !display_frame_requested.get()
+                    && !input_rate_tracker.borrow_mut().is_high_rate()
+                {
                     inactive_frame_interval.map(|interval| (interval, FrameRateLimit::Inactive))
                 } else if let Some(ThermalState::Critical | ThermalState::Serious) = thermal_state {
                     Some((Duration::from_micros(16667), FrameRateLimit::Thermal))
@@ -1977,6 +1984,7 @@ impl Window {
                 last_frame_time.set(Some(now));
 
                 let pending_next_frame_callbacks = next_frame_callbacks.take();
+                display_frame_requested.set(false);
                 if !pending_next_frame_callbacks.is_empty() {
                     handle
                         .update(&mut cx, |_, window, cx| {
@@ -2266,6 +2274,7 @@ impl Window {
             rendered_frame: Frame::new(DispatchTree::new(cx.keymap.clone(), cx.actions.clone())),
             next_frame: Frame::new(DispatchTree::new(cx.keymap.clone(), cx.actions.clone())),
             next_frame_callbacks,
+            display_frame_requested,
             next_hitbox_id: HitboxId(0),
             next_tooltip_id: TooltipId::default(),
             tooltip_bounds: None,
@@ -2930,6 +2939,13 @@ impl Window {
         self.invalidator.wake_platform();
     }
 
+    /// Schedule content at the display rate, bypassing inactive-window throttling.
+    /// Thermal throttling still applies.
+    pub fn on_next_display_frame(&self, callback: impl FnOnce(&mut Window, &mut App) + 'static) {
+        self.display_frame_requested.set(true);
+        self.on_next_frame(callback);
+    }
+
     /// Schedule a frame to be drawn on the next animation frame.
     ///
     /// This is useful for elements that need to animate continuously, such as a video player or an animated GIF.
@@ -2954,6 +2970,7 @@ impl Window {
     #[cfg(any(test, feature = "test-support"))]
     pub fn simulate_next_frame(&mut self, cx: &mut App) -> usize {
         let callbacks = self.next_frame_callbacks.take();
+        self.display_frame_requested.set(false);
         let count = callbacks.len();
         for callback in callbacks {
             callback(self, cx);
@@ -5636,10 +5653,7 @@ impl Window {
             return Ok(());
         }
 
-        let params = RenderImageParams {
-            image_id: data.id,
-            frame_index,
-        };
+        let params = RenderImageParams::from((&*data, frame_index));
 
         let tile = self
             .sprite_atlas
@@ -5797,10 +5811,7 @@ impl Window {
     /// Removes an image from the sprite atlas.
     pub fn drop_image(&mut self, data: Arc<RenderImage>) -> Result<()> {
         for frame_index in 0..data.frame_count() {
-            let params = RenderImageParams {
-                image_id: data.id,
-                frame_index,
-            };
+            let params = RenderImageParams::from((&*data, frame_index));
 
             self.sprite_atlas.remove(&params.clone().into());
         }
@@ -5813,14 +5824,46 @@ impl Window {
     pub fn has_image_atlas_entry(&self, data: &RenderImage) -> bool {
         data.frame_count() > 0
             && (0..data.frame_count()).all(|frame_index| {
-                self.sprite_atlas.contains(
-                    &RenderImageParams {
-                        image_id: data.id,
-                        frame_index,
-                    }
-                    .into(),
-                )
+                self.sprite_atlas
+                    .contains(&RenderImageParams::from((data, frame_index)).into())
             })
+    }
+
+    /// Update an existing image tile. Completion follows the atlas's GPU-read
+    /// lifetime contract, including errors and absent tiles.
+    pub fn update_image(
+        &mut self,
+        data: &RenderImage,
+        frame_index: usize,
+        region: Bounds<DevicePixels>,
+        update: crate::external_image::AtlasTileUpdate<'_>,
+        complete: Option<Box<dyn FnOnce() + Send>>,
+    ) -> Result<bool> {
+        self.sprite_atlas.update_tile(
+            &RenderImageParams::from((data, frame_index)).into(),
+            region,
+            update,
+            complete,
+        )
+    }
+
+    /// Ensure an external image's tile exists; `true` requires a complete frame
+    /// before damage-only updates can resume.
+    pub fn insert_blank_image(&mut self, data: &RenderImage, frame_index: usize) -> Result<bool> {
+        let key = RenderImageParams::from((data, frame_index)).into();
+        let size = data.size(frame_index);
+        if let Some(created) = self.sprite_atlas.insert_blank(&key, size)? {
+            return Ok(created);
+        }
+        let bytes = data
+            .as_bytes(frame_index)
+            .context("external image has no frame")?;
+        let mut created = false;
+        self.sprite_atlas.get_or_insert_with(key, &mut || {
+            created = true;
+            Ok(Some((size, Cow::Borrowed(bytes))))
+        })?;
+        Ok(created)
     }
 
     /// Add a node to the layout tree for the current frame. Takes the `Style` of the element for which

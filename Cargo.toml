@@ -275,6 +275,7 @@ publish = false
 edition = "2024"
 
 [workspace.dependencies]
+ash = "0.38"
 
 #
 # Workspace member crates

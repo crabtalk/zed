@@ -1,5 +1,6 @@
 use crate::native_view::{self, clip::CompositionView};
 use anyhow::Result;
+use block2::RcBlock;
 use gpui::{
     self, Bounds, Pixels, Point, Rgba,
     native_material::{MaterialStyle, NativeMaterial},
@@ -9,10 +10,11 @@ use objc2::{
     runtime::AnyClass, sel,
 };
 use objc2_app_kit::{
-    NSColor, NSGlassEffectContainerView, NSGlassEffectView, NSGlassEffectViewStyle, NSView,
-    NSVisualEffectBlendingMode, NSVisualEffectMaterial, NSVisualEffectState, NSVisualEffectView,
+    NSBezierPath, NSColor, NSGlassEffectContainerView, NSGlassEffectView, NSGlassEffectViewStyle,
+    NSImage, NSView, NSVisualEffectBlendingMode, NSVisualEffectMaterial, NSVisualEffectState,
+    NSVisualEffectView,
 };
-use objc2_foundation::{NSObjectProtocol, NSPoint, NSRect};
+use objc2_foundation::{NSEdgeInsets, NSObjectProtocol, NSPoint, NSRect, NSSize};
 use std::rc::Rc;
 
 macro_rules! content_host {
@@ -77,6 +79,7 @@ pub(crate) struct MaterialHost {
     pub(crate) clip: Retained<CompositionView>,
     pub(crate) content: Retained<CompositionView>,
     effect: Effect,
+    mask_radius: Option<Pixels>,
 }
 
 impl MaterialHost {
@@ -89,9 +92,8 @@ impl MaterialHost {
         clip.ivars().borrow_mut().interactive = true;
         let content = CompositionView::new(mtm);
         content.ivars().borrow_mut().interactive = true;
-        if matches!(source.style, MaterialStyle::Group { .. }) {
-            content.setClipsToBounds(false);
-        }
+        // The outer clip owns the scene's content mask; foreground may extend beyond the effect.
+        content.setClipsToBounds(false);
         content.ivars().borrow_mut().material = Some((source.state.clone(), changed));
         let effect = match source.style {
             MaterialStyle::Glass { .. } if AnyClass::get(c"NSGlassEffectView").is_some() => {
@@ -117,12 +119,16 @@ impl MaterialHost {
             }
             MaterialStyle::Group { .. } => Effect::Plain,
         };
+        if let Some(view) = effect.view() {
+            view.setClipsToBounds(false);
+        }
         clip.addSubview(effect.view().unwrap_or(&content));
         Self {
             source: source.clone(),
             clip,
             content,
             effect,
+            mask_radius: None,
         }
     }
 
@@ -201,9 +207,26 @@ impl MaterialHost {
                 MaterialStyle::Glass { corner_radius, .. }
                 | MaterialStyle::Popover { corner_radius },
             ) => {
-                if let Some(layer) = view.layer() {
-                    layer.setCornerRadius(f64::from(corner_radius));
-                    layer.setMasksToBounds(true);
+                if self.mask_radius != Some(corner_radius) {
+                    let radius = f64::from(corner_radius);
+                    let size = NSSize::new(radius * 2. + 1., radius * 2. + 1.);
+                    let draw = RcBlock::new(move |rect| {
+                        NSColor::whiteColor().setFill();
+                        NSBezierPath::bezierPathWithRoundedRect_xRadius_yRadius(
+                            rect, radius, radius,
+                        )
+                        .fill();
+                        objc2::runtime::Bool::YES
+                    });
+                    let mask = NSImage::imageWithSize_flipped_drawingHandler(size, true, &draw);
+                    mask.setCapInsets(NSEdgeInsets {
+                        top: radius,
+                        left: radius,
+                        bottom: radius,
+                        right: radius,
+                    });
+                    view.setMaskImage(Some(&mask));
+                    self.mask_radius = Some(corner_radius);
                 }
             }
             _ => {}

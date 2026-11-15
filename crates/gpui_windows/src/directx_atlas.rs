@@ -1,16 +1,28 @@
+use anyhow::{Context as _, Result, ensure};
 use etagere::BucketedAtlasAllocator;
-use parking_lot::Mutex;
-use windows::Win32::Graphics::{
-    Direct3D11::{
-        D3D11_BIND_SHADER_RESOURCE, D3D11_BOX, D3D11_TEXTURE2D_DESC, D3D11_USAGE_DEFAULT,
-        ID3D11Device, ID3D11DeviceContext, ID3D11ShaderResourceView, ID3D11Texture2D,
-    },
-    Dxgi::Common::*,
-};
-
 use gpui::{
     AtlasBackend, AtlasKey, AtlasState, AtlasTextureId, AtlasTextureKind, AtlasTextureList,
     AtlasTile, Bounds, DevicePixels, PlatformAtlas, Point, Size,
+    external_image::{AtlasTileUpdate, DxgiAdapterId},
+};
+use parking_lot::Mutex;
+use std::{os::windows::io::AsRawHandle as _, sync::mpsc, thread, time::Duration};
+use windows::{
+    Win32::{
+        Foundation::HANDLE,
+        Graphics::{
+            Direct3D11::{
+                self, D3D11_BOX, D3D11_TEXTURE2D_DESC, ID3D11Device, ID3D11Device5,
+                ID3D11DeviceContext, ID3D11DeviceContext4, ID3D11Fence, ID3D11ShaderResourceView,
+                ID3D11Texture2D,
+            },
+            Dxgi::{
+                Common::{self, DXGI_SAMPLE_DESC},
+                IDXGIDevice,
+            },
+        },
+    },
+    core::Interface as _,
 };
 
 pub(crate) struct DirectXAtlas(Mutex<AtlasState<DirectXAtlasTextures>>);
@@ -18,6 +30,7 @@ pub(crate) struct DirectXAtlas(Mutex<AtlasState<DirectXAtlasTextures>>);
 struct DirectXAtlasTextures {
     device: ID3D11Device,
     device_context: ID3D11DeviceContext,
+    completion: Option<Completion>,
     monochrome_textures: AtlasTextureList<DirectXAtlasTexture>,
     polychrome_textures: AtlasTextureList<DirectXAtlasTexture>,
     subpixel_textures: AtlasTextureList<DirectXAtlasTexture>,
@@ -37,6 +50,7 @@ impl DirectXAtlas {
         DirectXAtlas(Mutex::new(AtlasState::new(DirectXAtlasTextures {
             device: device.clone(),
             device_context: device_context.clone(),
+            completion: None,
             monochrome_textures: Default::default(),
             polychrome_textures: Default::default(),
             subpixel_textures: Default::default(),
@@ -65,6 +79,7 @@ impl DirectXAtlas {
         lock.clear(|textures| {
             textures.device = device.clone();
             textures.device_context = device_context.clone();
+            textures.completion = None;
             textures.monochrome_textures = AtlasTextureList::default();
             textures.polychrome_textures = AtlasTextureList::default();
             textures.subpixel_textures = AtlasTextureList::default();
@@ -85,6 +100,158 @@ impl PlatformAtlas for DirectXAtlas {
 
     fn remove(&self, key: &AtlasKey) {
         self.0.lock().remove(key);
+    }
+    fn shared_texture_adapter(&self) -> Option<DxgiAdapterId> {
+        let lock = self.0.lock();
+        lock.backend.device.cast::<ID3D11Device5>().ok()?;
+        lock.backend
+            .device_context
+            .cast::<ID3D11DeviceContext4>()
+            .ok()?;
+        let device: IDXGIDevice = lock.backend.device.cast().ok()?;
+        let description = unsafe { device.GetAdapter().ok()?.GetDesc().ok()? };
+        Some(DxgiAdapterId {
+            low: description.AdapterLuid.LowPart,
+            high: description.AdapterLuid.HighPart,
+        })
+    }
+
+    fn update_tile(
+        &self,
+        key: &AtlasKey,
+        region: Bounds<DevicePixels>,
+        update: AtlasTileUpdate<'_>,
+        complete: Option<Box<dyn FnOnce() + Send>>,
+    ) -> Result<bool> {
+        let mut lock = self.0.lock();
+        if lock.backend.completion.is_none() {
+            match Completion::new(&lock.backend.device, &lock.backend.device_context) {
+                Ok(completion) => lock.backend.completion = Some(completion),
+                Err(error) => {
+                    drop(lock);
+                    if let Some(complete) = complete {
+                        complete();
+                    }
+                    return Err(error);
+                }
+            }
+        }
+        let mut retained = Vec::new();
+        let result = (|| -> Result<bool> {
+            let Some(tile) = lock.tiles_by_key.get(key).copied() else {
+                return Ok(false);
+            };
+            ensure!(
+                region.origin.x.0 >= 0
+                    && region.origin.y.0 >= 0
+                    && region.size.width.0 > 0
+                    && region.size.height.0 > 0
+                    && i64::from(region.origin.x.0) + i64::from(region.size.width.0)
+                        <= i64::from(tile.bounds.size.width.0)
+                    && i64::from(region.origin.y.0) + i64::from(region.size.height.0)
+                        <= i64::from(tile.bounds.size.height.0),
+                "external image update lies outside its tile"
+            );
+            let texture = lock
+                .backend
+                .texture(tile.texture_id)
+                .context("external image tile was evicted")?;
+            ensure!(
+                texture.bytes_per_pixel == 4
+                    && tile.texture_id.kind == AtlasTextureKind::Polychrome,
+                "external image needs a BGRA atlas"
+            );
+            let bounds = Bounds::new(tile.bounds.origin + region.origin, region.size);
+            match update {
+                AtlasTileUpdate::Pixels {
+                    bytes,
+                    bytes_per_row,
+                } => {
+                    let row = region.size.width.0 as usize * 4;
+                    let rows = region.size.height.0 as usize;
+                    let stride = bytes_per_row as usize;
+                    let length = stride
+                        .checked_mul(rows - 1)
+                        .and_then(|length| length.checked_add(row))
+                        .context("external image size overflow")?;
+                    ensure!(
+                        stride >= row && bytes.len() >= length,
+                        "external image rows are incomplete"
+                    );
+                    let mut data = Vec::with_capacity(row * rows);
+                    for line in bytes.chunks(stride).take(rows) {
+                        data.extend_from_slice(&line[..row]);
+                    }
+                    texture.upload(&lock.backend.device_context, bounds, &data);
+                }
+                AtlasTileUpdate::SharedTexture {
+                    texture: source,
+                    origin,
+                } => {
+                    let device: ID3D11Device5 = lock.backend.device.cast()?;
+                    let context: ID3D11DeviceContext4 = lock.backend.device_context.cast()?;
+                    let source_texture: ID3D11Texture2D = unsafe {
+                        device.OpenSharedResource1(HANDLE(source.resource.as_raw_handle()))?
+                    };
+                    let mut fence: Option<ID3D11Fence> = None;
+                    unsafe {
+                        device.OpenSharedFence(HANDLE(source.fence.as_raw_handle()), &mut fence)?;
+                    }
+                    let fence = fence.context("shared texture fence unavailable")?;
+                    let mut description = D3D11_TEXTURE2D_DESC::default();
+                    unsafe {
+                        source_texture.GetDesc(&mut description);
+                    }
+                    ensure!(
+                        description.Format == Common::DXGI_FORMAT_B8G8R8A8_UNORM
+                            && description.ArraySize == 1
+                            && description.MipLevels == 1
+                            && description.SampleDesc.Count == 1,
+                        "shared texture must be single-layer BGRA8"
+                    );
+                    ensure!(
+                        origin.x.0 >= 0
+                            && origin.y.0 >= 0
+                            && i64::from(origin.x.0) + i64::from(region.size.width.0)
+                                <= i64::from(description.Width)
+                            && i64::from(origin.y.0) + i64::from(region.size.height.0)
+                                <= i64::from(description.Height),
+                        "copy lies outside shared texture"
+                    );
+                    let source_box = D3D11_BOX {
+                        left: origin.x.0 as u32,
+                        top: origin.y.0 as u32,
+                        front: 0,
+                        right: (origin.x.0 + region.size.width.0) as u32,
+                        bottom: (origin.y.0 + region.size.height.0) as u32,
+                        back: 1,
+                    };
+                    unsafe {
+                        context.Wait(&fence, source.value)?;
+                        context.CopySubresourceRegion(
+                            &texture.texture,
+                            0,
+                            bounds.origin.x.0 as u32,
+                            bounds.origin.y.0 as u32,
+                            0,
+                            &source_texture,
+                            0,
+                            Some(&source_box),
+                        );
+                    }
+                    retained.push(source_texture);
+                    retained.push(texture.texture.clone());
+                }
+            }
+            Ok(true)
+        })();
+        let completion = lock
+            .backend
+            .completion
+            .as_mut()
+            .context("GPU completion queue unavailable")?;
+        let submitted = completion.retire(retained, complete);
+        result.and_then(|updated| submitted.map(|()| updated))
     }
 }
 
@@ -177,18 +344,18 @@ impl DirectXAtlasTextures {
         let bytes_per_pixel;
         match kind {
             AtlasTextureKind::Monochrome => {
-                pixel_format = DXGI_FORMAT_R8_UNORM;
-                bind_flag = D3D11_BIND_SHADER_RESOURCE;
+                pixel_format = Common::DXGI_FORMAT_R8_UNORM;
+                bind_flag = Direct3D11::D3D11_BIND_SHADER_RESOURCE;
                 bytes_per_pixel = 1;
             }
             AtlasTextureKind::Polychrome => {
-                pixel_format = DXGI_FORMAT_B8G8R8A8_UNORM;
-                bind_flag = D3D11_BIND_SHADER_RESOURCE;
+                pixel_format = Common::DXGI_FORMAT_B8G8R8A8_UNORM;
+                bind_flag = Direct3D11::D3D11_BIND_SHADER_RESOURCE;
                 bytes_per_pixel = 4;
             }
             AtlasTextureKind::Subpixel => {
-                pixel_format = DXGI_FORMAT_R8G8B8A8_UNORM;
-                bind_flag = D3D11_BIND_SHADER_RESOURCE;
+                pixel_format = Common::DXGI_FORMAT_R8G8B8A8_UNORM;
+                bind_flag = Direct3D11::D3D11_BIND_SHADER_RESOURCE;
                 bytes_per_pixel = 4;
             }
         }
@@ -202,7 +369,7 @@ impl DirectXAtlasTextures {
                 Count: 1,
                 Quality: 0,
             },
-            Usage: D3D11_USAGE_DEFAULT,
+            Usage: Direct3D11::D3D11_USAGE_DEFAULT,
             BindFlags: bind_flag.0 as u32,
             CPUAccessFlags: 0,
             MiscFlags: 0,
@@ -416,5 +583,81 @@ mod tests {
 
         let tile_b = insert_tile(&atlas, big_key_b, big);
         assert_eq!(tile_b.texture_id, keeper_tile.texture_id);
+    }
+}
+
+struct Pending {
+    value: u64,
+    _textures: Vec<ID3D11Texture2D>,
+    complete: Option<Box<dyn FnOnce() + Send>>,
+}
+
+struct Completion {
+    fence: ID3D11Fence,
+    context: ID3D11DeviceContext4,
+    value: u64,
+    sender: mpsc::Sender<Pending>,
+}
+impl Completion {
+    fn new(device: &ID3D11Device, context: &ID3D11DeviceContext) -> Result<Self> {
+        let device5: ID3D11Device5 = device.cast()?;
+        let context: ID3D11DeviceContext4 = context.cast()?;
+        let mut fence: Option<ID3D11Fence> = None;
+        unsafe {
+            device5.CreateFence(0, Direct3D11::D3D11_FENCE_FLAG_NONE, &mut fence)?;
+        }
+        let fence = fence.context("GPU completion fence unavailable")?;
+        let (sender, receiver) = mpsc::channel::<Pending>();
+        let completed = fence.clone();
+        let device = device.clone();
+        thread::Builder::new()
+            .name("gpui-d3d-completion".into())
+            .spawn(move || {
+                for pending in receiver {
+                    loop {
+                        let value = unsafe { completed.GetCompletedValue() };
+                        if value >= pending.value
+                            || unsafe { device.GetDeviceRemovedReason() }.is_err()
+                        {
+                            break;
+                        }
+                        thread::sleep(Duration::from_millis(1));
+                    }
+                    if let Some(complete) = pending.complete {
+                        complete();
+                    }
+                }
+            })?;
+        Ok(Self {
+            fence,
+            context,
+            value: 0,
+            sender,
+        })
+    }
+    fn retire(
+        &mut self,
+        textures: Vec<ID3D11Texture2D>,
+        complete: Option<Box<dyn FnOnce() + Send>>,
+    ) -> Result<()> {
+        self.value = self
+            .value
+            .checked_add(1)
+            .context("GPU completion fence exhausted")?;
+        let signal = unsafe { self.context.Signal(&self.fence, self.value) };
+        unsafe {
+            self.context.Flush();
+        }
+        // Device removal also completes retirement. A signal error must not
+        // return a producer's buffer while earlier copies may still read it.
+        self.sender
+            .send(Pending {
+                value: self.value,
+                _textures: textures,
+                complete,
+            })
+            .map_err(|_| anyhow::anyhow!("GPU completion worker stopped"))?;
+        signal?;
+        Ok(())
     }
 }

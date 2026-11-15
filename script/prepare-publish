@@ -233,13 +233,8 @@ See [`bezel-gpui`](https://crates.io/crates/bezel-gpui) for the fork's entry poi
 """
 
 
-def wgpu_version(package, revision):
-    return package["version"] + "-bezel.r" + revision
-
-
-def rewrite_wgpu(text, name, packages, revision):
+def rewrite_wgpu(text, name, packages, version):
     text = strip_dev_deps(text)
-    version = wgpu_version(packages[name], revision)
     text = re.sub(r'^name = "[^"]*"$', f'name = "{published(name)}"', text,
                   count=1, flags=re.M)
     text = re.sub(r'^version = "[^"]*"$', f'version = "{version}"', text,
@@ -253,17 +248,16 @@ def rewrite_wgpu(text, name, packages, revision):
             if re.search(r'^path = ', body, flags=re.M):
                 sys.exit(f"{name}: dependency {dependency_name} escapes WGPU closure")
             return match.group(0)
-        dependency_version = wgpu_version(packages[dependency_name], revision)
         body = re.sub(r'^(version|path|package) = .*\n', "", body, flags=re.M)
         return (f'{header}\npackage = "{published(dependency_name)}"\n'
-                f'version = "={dependency_version}"\n'
+                f'version = "={version}"\n'
                 f'path = "../{dependency_name}"\n{body}')
 
     return re.sub(r'(\[(?:target\.[^\n]*\.)?(?:build-)?dependencies\.([^]\n]+)\])\n'
                   r'(.*?)(?=^\[|\Z)', dependency, text, flags=re.M | re.S)
 
 
-def vendor_wgpu(root, packages, dry):
+def vendor_wgpu(root, packages, version, dry):
     if not packages:
         return {}
     revisions = {package["source"].rsplit("#", 1)[1] for package in packages.values()}
@@ -297,7 +291,7 @@ def vendor_wgpu(root, packages, dry):
             shutil.copytree(source, destination)
             (destination / ".cargo-checksum.json").unlink(missing_ok=True)
             manifest = destination / "Cargo.toml"
-            manifest.write_text(rewrite_wgpu(manifest.read_text(), name, packages, revision))
+            manifest.write_text(rewrite_wgpu(manifest.read_text(), name, packages, version))
             upstream = Path(package["manifest_path"]).parent
             readme = upstream / "README.md"
             if name == "wgpu":
@@ -310,10 +304,8 @@ def vendor_wgpu(root, packages, dry):
     return destinations
 
 
-def attach_wgpu(text, root, packages, manifests):
+def attach_wgpu(text, root, manifests, version):
     for name, manifest in sorted(manifests.items()):
-        revision = packages[name]["source"].rsplit("#", 1)[1]
-        version = wgpu_version(packages[name], revision)
         path = manifest.parent.relative_to(root).as_posix()
 
         def dependency(match):
@@ -523,7 +515,7 @@ def main():
     errors = unpublished_dependencies(crates, versionless)
     if errors:
         sys.exit("dependencies have no publishable registry version:\n  " + "\n  ".join(errors))
-    vendored = vendor_wgpu(root, external, dry)
+    vendored = vendor_wgpu(root, external, version, dry)
     print(f"{len(crates)} crates -> {PREFIX}-* @ {version}\n")
 
     for name, manifest in sorted(crates.items()):
@@ -541,7 +533,7 @@ def main():
 
     root_manifest = root / "Cargo.toml"
     new_root = rewrite_root(root_manifest.read_text(), sorted(crates), version, outside)
-    new_root = attach_wgpu(new_root, root, external, vendored)
+    new_root = attach_wgpu(new_root, root, vendored, version)
     if not dry:
         root_manifest.write_text(new_root)
 

@@ -40,19 +40,35 @@ version = "0.4"
 path = "../naga-test"
 '''
         packages = {name: {"version": "30.0.0"} for name in ("wgpu", "wgpu-core")}
-        result = prepare.rewrite_wgpu(text, "wgpu", packages, "cddb2f5abcdef")
+        result = prepare.rewrite_wgpu(text, "wgpu", packages, "0.3.25+zed.e4a373")
         self.assertIn('[lib]\nname = "wgpu"', result)
         self.assertIn('package = "bezel-wgpu-core"', result)
-        self.assertIn('version = "=30.0.0-bezel.rcddb2f5abcdef"', result)
+        self.assertIn('version = "=0.3.25+zed.e4a373"', result)
         self.assertIn('features = ["webgl"]\noptional = true', result)
         self.assertIn('[dependencies.log]\nversion = "0.4"', result)
         self.assertNotIn("naga-test", result)
+
+    def test_wgpu_packages_and_dependencies_follow_each_fork_release(self):
+        text = '[package]\nname = "wgpu"\nversion = "30.0.0"\n[dependencies.naga]\nversion = "30.0.0"\npath = "../naga"\n'
+        root = Path("/release")
+        manifests = {name: root / "vendor/wgpu" / name / "Cargo.toml"
+                     for name in ("wgpu", "naga")}
+        workspace = '[workspace]\nmembers = [\n]\n[workspace.dependencies]\nwgpu = { git = "https://github.com/gfx-rs/wgpu", rev = "abc", default-features = false }\n'
+        for version in ("0.3.25+zed.e4a373", "0.3.26+zed.e4a373"):
+            with self.subTest(version=version):
+                result = prepare.rewrite_wgpu(text, "wgpu", manifests, version)
+                self.assertIn(f'name = "bezel-wgpu"\nversion = "{version}"', result)
+                self.assertIn(f'package = "bezel-naga"\nversion = "={version}"', result)
+                self.assertNotIn("30.0.0", result)
+                result = prepare.attach_wgpu(workspace, root, manifests, version)
+                self.assertIn(f'package = "bezel-wgpu", version = "={version}"', result)
+                self.assertIn('default-features = false', result)
 
     def test_dependency_outside_the_wgpu_closure_fails(self):
         with self.assertRaisesRegex(SystemExit, "escapes WGPU closure"):
             prepare.rewrite_wgpu(
                 '[dependencies.other]\npath = "../other"\n', "wgpu",
-                {"wgpu": {"version": "30.0.0"}}, "cddb2f5abcdef")
+                {"wgpu": {"version": "30.0.0"}}, "0.3.25+zed.e4a373")
 
     def test_registry_patches_are_not_versionless_workspace_dependencies(self):
         text = '''[workspace.dependencies]

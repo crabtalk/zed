@@ -32,12 +32,11 @@ use objc2_metal::{
 };
 use objc2_quartz_core::{CAMetalDrawable, CAMetalLayer};
 use parking_lot::Mutex;
-
 use std::{
     cell::Cell,
     mem,
     mem::MaybeUninit,
-    ops::{Range, RangeBounds},
+    ops::{Bound, Range, RangeBounds},
     ptr, slice,
     sync::{
         Arc,
@@ -924,6 +923,13 @@ impl MetalRenderer {
             .enumerate()
             .filter(|(_, blur)| orders.contains(&blur.order))
             .peekable();
+        let mut quad_cursor = scene
+            .quads
+            .partition_point(|quad| match orders.start_bound() {
+                Bound::Included(start) => quad.order < *start,
+                Bound::Excluded(start) => quad.order <= *start,
+                Bound::Unbounded => false,
+            }) as u32;
         for batch in batches.into_iter().map(Some).chain(std::iter::once(None)) {
             while pending_blurs.peek().is_some_and(|(_, blur)| {
                 blur.order
@@ -983,8 +989,6 @@ impl MetalRenderer {
             }
             let Some(batch) = batch else { break };
 
-            let order = scene.batch_first_order(&batch);
-            let quad_cursor = scene.quads.partition_point(|quad| quad.order < order) as u32;
             // Quad shaders assign each quad its own depth.
             // In every other batch type, the depth is fixed to the position of the quad cursor.
             let (znear, zfar) = if matches!(&batch, PrimitiveBatch::Quads(_)) {
@@ -1007,6 +1011,7 @@ impl MetalRenderer {
                     self.draw_shadows(range, instance_bindings, &command_encoder)
                 }
                 PrimitiveBatch::Quads(range) => {
+                    quad_cursor = range.end as u32;
                     if !scene.backdrop_blurs.is_empty() {
                         self.draw_opaque_quads(range.clone(), instance_bindings, &command_encoder);
                         command_encoder.setDepthStencilState(Some(&self.depth_test_state));

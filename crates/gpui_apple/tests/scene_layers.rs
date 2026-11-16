@@ -285,3 +285,101 @@ fn native_materials_require_separate_export_but_allow_foreground_layer_readback(
     assert_eq!(foreground.get_pixel(12, 4).0, [0, 0, 0, 0]);
     Ok(())
 }
+
+#[test]
+fn foreground_batches_stay_above_opaque_quads_at_the_same_order() -> Result<()> {
+    let mut renderer = MetalRenderer::new_headless(Default::default())?;
+    let tile = renderer
+        .sprite_atlas()
+        .get_or_insert_with(
+            AtlasKey::Image(RenderImageParams {
+                image_id: ImageId(2),
+                frame_index: 0,
+            }),
+            &mut || {
+                Ok(Some((
+                    gpui::size(8.into(), 8.into()),
+                    Cow::Owned([0, 255, 0, 255].repeat(64)),
+                )))
+            },
+        )?
+        .ok_or_else(|| anyhow::anyhow!("atlas tile was not created"))?;
+    for kind in ["path", "underline", "image"] {
+        let mut scene = Scene::default();
+        let background = quad(5, 0., gpui::rgb(0xff0000).into());
+        scene.insert_primitive(quad(0, 8., gpui::rgb(0x0000ff).into()));
+        scene.insert_primitive(background);
+        match kind {
+            "path" => {
+                let mut path = PathBuilder::fill();
+                path.move_to(gpui::point(gpui::px(0.), gpui::px(0.)));
+                path.line_to(gpui::point(gpui::px(8.), gpui::px(0.)));
+                path.line_to(gpui::point(gpui::px(8.), gpui::px(8.)));
+                path.line_to(gpui::point(gpui::px(0.), gpui::px(8.)));
+                path.close();
+                let path = PaintedPath::new(
+                    path.build()?,
+                    1.,
+                    ContentMask::new(background.bounds.map(|value| gpui::px(value.0))),
+                    gpui::rgb(0x00ff00).into(),
+                );
+                scene.insert_primitive(path);
+            }
+            "underline" => scene.insert_primitive(gpui::Underline {
+                order: 5,
+                pad: 0,
+                bounds: background.bounds,
+                content_mask: background.content_mask,
+                color: gpui::rgb(0x00ff00).into(),
+                thickness: ScaledPixels(8.),
+                wavy: false.into(),
+            }),
+            "image" => scene.insert_primitive(PolychromeSprite {
+                order: 5,
+                pad: 0,
+                grayscale: false.into(),
+                opacity: 1.,
+                bounds: background.bounds,
+                content_mask: background.content_mask,
+                corner_radii: Default::default(),
+                tile,
+            }),
+            _ => unreachable!(),
+        }
+        scene.finish();
+        for orders in [
+            (std::ops::Bound::Unbounded, std::ops::Bound::Unbounded),
+            (std::ops::Bound::Included(1), std::ops::Bound::Included(1)),
+        ] {
+            let output = renderer.render_scene_layer_to_image(
+                &scene,
+                gpui::size(16.into(), 8.into()),
+                orders,
+                true,
+            )?;
+            assert_eq!(
+                output.get_pixel(4, 4).0,
+                [0, 255, 0, 255],
+                "{kind} disappeared"
+            );
+        }
+    }
+    Ok(())
+}
+
+#[test]
+fn transparent_foreground_layers_preserve_background_and_alpha() -> Result<()> {
+    let mut renderer = MetalRenderer::new_headless(Default::default())?;
+    let mut scene = Scene::default();
+    scene.quads.extend([
+        quad(0, 0., gpui::rgb(0xff0000).into()),
+        quad(1, 0., gpui::rgba(0x0000ff80).into()),
+    ]);
+    scene.finish();
+    let size = gpui::size(8.into(), 8.into());
+    let foreground = renderer.render_scene_layer_to_image(&scene, size, 1..2, true)?;
+    let full = renderer.render_scene_to_image(&scene, size)?;
+    assert_eq!(foreground.get_pixel(4, 4).0, [0, 0, 128, 128]);
+    assert_eq!(full.get_pixel(4, 4).0, [127, 0, 128, 255]);
+    Ok(())
+}

@@ -266,13 +266,13 @@ def vendor_wgpu(root, packages, version, dry):
     revision = revisions.pop()
     destinations = {name: root / "vendor" / "wgpu" / name / "Cargo.toml"
                     for name in packages}
-    if any(manifest.parent.exists() for manifest in destinations.values()):
-        sys.exit("vendor/wgpu already exists; prepare from an unprepared checkout")
     print(f"  vendor {len(packages)} WGPU packages from {revision}")
     if dry:
         return destinations
 
-    with tempfile.TemporaryDirectory(prefix="bezel-wgpu-") as directory:
+    vendor = root / "vendor" / "wgpu"
+    vendor.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix=".bezel-wgpu-", dir=vendor.parent) as directory:
         temporary = Path(directory)
         (temporary / "src").mkdir()
         (temporary / "src" / "lib.rs").touch()
@@ -287,7 +287,7 @@ def vendor_wgpu(root, packages, version, dry):
                        check=True, stdout=subprocess.DEVNULL)
         for name, package in sorted(packages.items()):
             source = temporary / "vendor" / f'{name}-{package["version"]}'
-            destination = destinations[name].parent
+            destination = temporary / "prepared" / name
             shutil.copytree(source, destination)
             (destination / ".cargo-checksum.json").unlink(missing_ok=True)
             manifest = destination / "Cargo.toml"
@@ -301,6 +301,15 @@ def vendor_wgpu(root, packages, version, dry):
                 f"> **NOTICE**\n> Modified distribution of `{name}` from "
                 f'[gfx-rs/wgpu](https://github.com/gfx-rs/wgpu/tree/{revision}), '
                 f'published as `bezel-{name}`.\n\n{body}')
+        previous = temporary / "previous"
+        if vendor.exists():
+            vendor.rename(previous)
+        try:
+            (temporary / "prepared").rename(vendor)
+        except OSError:
+            if previous.exists():
+                previous.rename(vendor)
+            raise
     return destinations
 
 

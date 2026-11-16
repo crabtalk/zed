@@ -114,5 +114,59 @@ xim = { git = "https://github.com/zed-industries/xim-rs.git", features = [
         self.assertNotIn("editor", command)
 
 
+class WgpuVendoringTests(unittest.TestCase):
+    def setUp(self):
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        self.root = Path(directory.name)
+        upstream = self.root / "upstream"
+        upstream.mkdir()
+        (upstream / "README.md").write_text("WGPU upstream\n")
+        self.packages = {"wgpu": {
+            "version": "30.0.0",
+            "source": "git+https://github.com/gfx-rs/wgpu?rev=abc#abc",
+            "manifest_path": str(upstream / "wgpu" / "Cargo.toml"),
+        }}
+        self.vendor = self.root / "vendor" / "wgpu"
+        self.vendor.mkdir(parents=True)
+        (self.vendor / "previous-release").write_text("preserve until success")
+
+    def cargo_vendor(self, command, **kwargs):
+        package = Path(command[-1]) / "wgpu-30.0.0"
+        package.mkdir(parents=True)
+        (package / "Cargo.toml").write_text(
+            '[package]\nname = "wgpu"\nversion = "30.0.0"\n')
+        (package / ".cargo-checksum.json").write_text("{}")
+        return subprocess.CompletedProcess(command, 0)
+
+    def test_new_release_replaces_previous_generated_output(self):
+        with patch.object(prepare.subprocess, "run", side_effect=self.cargo_vendor):
+            for version in ("0.3.26", "0.3.27"):
+                with self.subTest(version=version):
+                    manifests = prepare.vendor_wgpu(self.root, self.packages, version, False)
+                    manifest = self.vendor / "wgpu" / "Cargo.toml"
+                    self.assertEqual(manifests, {"wgpu": manifest})
+                    self.assertIn(f'version = "{version}"', manifest.read_text())
+                    self.assertFalse((self.vendor / "previous-release").exists())
+                    self.assertFalse((manifest.parent / ".cargo-checksum.json").exists())
+                    self.assertIn("WGPU upstream", (manifest.parent / "README.md").read_text())
+
+    def test_failed_generation_preserves_previous_output(self):
+        with patch.object(prepare.subprocess, "run", side_effect=self.cargo_vendor), patch.object(
+                prepare, "rewrite_wgpu", side_effect=ValueError("invalid manifest")):
+            with self.assertRaisesRegex(ValueError, "invalid manifest"):
+                prepare.vendor_wgpu(self.root, self.packages, "0.3.26", False)
+        self.assertEqual(list(self.vendor.iterdir()), [self.vendor / "previous-release"])
+        self.assertEqual((self.vendor / "previous-release").read_text(), "preserve until success")
+        self.assertEqual(list(self.vendor.parent.iterdir()), [self.vendor])
+
+    def test_dry_run_preserves_previous_output_without_running_cargo(self):
+        with patch.object(prepare.subprocess, "run") as run:
+            prepare.vendor_wgpu(self.root, self.packages, "0.3.26", True)
+        run.assert_not_called()
+        self.assertEqual(list(self.vendor.iterdir()), [self.vendor / "previous-release"])
+        self.assertEqual(list(self.vendor.parent.iterdir()), [self.vendor])
+
+
 if __name__ == "__main__":
     unittest.main()

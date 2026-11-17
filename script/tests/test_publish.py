@@ -139,6 +139,22 @@ class WgpuVendoringTests(unittest.TestCase):
         (package / ".cargo-checksum.json").write_text("{}")
         return subprocess.CompletedProcess(command, 0)
 
+    def test_temporary_vendoring_package_owns_its_workspace(self):
+        (self.root / "Cargo.toml").write_text('[workspace]\nmembers = []\n')
+        run_cargo = subprocess.run
+
+        def cargo_vendor(command, **kwargs):
+            manifest = Path(command[command.index("--manifest-path") + 1])
+            result = run_cargo(
+                ["cargo", "locate-project", "--workspace", "--message-format", "plain",
+                 "--manifest-path", str(manifest)],
+                check=True, capture_output=True, text=True)
+            self.assertEqual(Path(result.stdout.strip()), manifest)
+            return self.cargo_vendor(command, **kwargs)
+
+        with patch.object(prepare.subprocess, "run", side_effect=cargo_vendor):
+            prepare.vendor_wgpu(self.root, self.packages, "0.3.28", False)
+
     def test_new_release_replaces_previous_generated_output(self):
         with patch.object(prepare.subprocess, "run", side_effect=self.cargo_vendor):
             for version in ("0.3.26", "0.3.27"):

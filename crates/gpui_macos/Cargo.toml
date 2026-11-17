@@ -65,5 +65,11 @@ uuid.workspace = true
 # GPUI and the extracted renderer. A dependency does not inherit this crate's
 # `cfg(test)`, so dev-dependencies enable those APIs only for test builds.
 [target.'cfg(target_os = "macos")'.dev-dependencies]
+libtest-mimic.workspace = true
 gpui = { workspace = true, features = ["test-support"] }
 gpui_apple = { workspace = true, features = ["test-support"] }
+
+[[test]]
+name = "cursor"
+path = "tests/cursor.rs"
+harness = false

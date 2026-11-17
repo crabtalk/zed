@@ -152,8 +152,8 @@ unsafe fn build_classes() {
                 handle_view_event as extern "C" fn(_, Sel, *mut AnyObject),
             );
             decl.add_method(
-                sel!(resetCursorRects),
-                reset_cursor_rects as extern "C" fn(_, Sel),
+                sel!(cursorUpdate:),
+                update_cursor as extern "C" fn(_, Sel, *mut AnyObject),
             );
             decl.add_method(
                 sel!(pressureChangeWithEvent:),
@@ -374,8 +374,6 @@ pub(crate) fn convert_mouse_position(position: NSPoint, window_height: Pixels) -
     )
 }
 
-/// Stores the cursor style on the active GPUI window and invalidates its cursor rects.
-///
 /// # Safety
 ///
 /// This function is not thread safe. Callers must ensure this is called on the AppKit main
@@ -401,14 +399,8 @@ pub(crate) unsafe fn set_active_window_cursor_style(style: CursorStyle) {
         };
 
         let window_state = get_window_state(&*active_window);
-        let mut window_state = window_state.lock();
-        if window_state.cursor_style != style {
-            window_state.cursor_style = style;
-            let _: () = msg_send![
-                window_state.native_window,
-                invalidateCursorRectsForView: window_state.native_view.as_ptr()
-            ];
-        }
+        window_state.lock().cursor_style = style;
+        let _: () = msg_send![native_cursor(style), set];
     }
 }
 
@@ -1306,6 +1298,12 @@ impl MacWindow {
             // SAFETY: This is the live GPUIView (an NSView subclass) added to the
             // content view above, and window creation runs on the main thread.
             let tracking_view = &*native_view.cast::<NSView>();
+            add_tracking_area(
+                tracking_view,
+                NSTrackingAreaOptions::CursorUpdate
+                    | NSTrackingAreaOptions::ActiveInKeyWindow
+                    | NSTrackingAreaOptions::InVisibleRect,
+            );
 
             match kind {
                 WindowKind::Normal | WindowKind::Floating => {
@@ -2856,6 +2854,10 @@ fn add_mouse_tracking_area(native_view: &NSView) {
         | NSTrackingAreaOptions::ActiveAlways
         | NSTrackingAreaOptions::InVisibleRect;
 
+    add_tracking_area(native_view, options);
+}
+
+fn add_tracking_area(native_view: &NSView, options: NSTrackingAreaOptions) {
     // SAFETY: NSView provides the tracking-event callbacks, and the owner is
     // the same view that retains the tracking area. No user info is supplied.
     let tracking_area = unsafe {
@@ -2914,20 +2916,13 @@ pub(crate) unsafe fn native_cursor(style: CursorStyle) -> *mut AnyObject {
     }
 }
 
-extern "C" fn reset_cursor_rects(this: &AnyObject, _: Sel) {
-    // SAFETY: AppKit invokes cursor-rect updates on the main thread for GPUIView instances,
-    // whose WINDOW_STATE_IVAR is initialized when the view is created. The cursor registered
-    // below is a valid NSCursor.
+extern "C" fn update_cursor(this: &AnyObject, _: Sel, _: *mut AnyObject) {
+    // SAFETY: AppKit invokes this callback on the main thread for GPUIView instances,
+    // whose WINDOW_STATE_IVAR is initialized when the view is created.
     unsafe {
-        let _: () = msg_send![super(this, class!(NSView)), resetCursorRects];
-
         let window_state = get_window_state(this);
         let cursor_style = window_state.lock().cursor_style;
-
-        let cursor = native_cursor(cursor_style);
-
-        let bounds: NSRect = msg_send![this, bounds];
-        let _: () = msg_send![this, addCursorRect: bounds, cursor: cursor];
+        let _: () = msg_send![native_cursor(cursor_style), set];
     }
 }
 

@@ -278,7 +278,7 @@ def vendor_wgpu(root, packages, version, dry):
         (temporary / "src" / "lib.rs").touch()
         (temporary / "Cargo.toml").write_text(
             '[package]\nname = "bezel-wgpu-vendor"\nversion = "0.0.0"\n'
-            'edition = "2024"\n[dependencies]\n'
+            'edition = "2024"\n[workspace]\n[dependencies]\n'
             f'wgpu = {{ git = "https://github.com/gfx-rs/wgpu", rev = "{revision}", '
             'features = ["webgl", "vulkan", "metal", "gles", "dx12"] }\n'
             f'naga = {{ git = "https://github.com/gfx-rs/wgpu", rev = "{revision}" }}\n')

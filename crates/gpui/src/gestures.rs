@@ -6,20 +6,18 @@
 //! [`ScrollEvent`](crate::ScrollEvent)s, including post-release
 //! momentum. Long presses and touch drags can be claimed by element listeners.
 
-use std::collections::VecDeque;
-use std::mem;
-use std::time::Duration;
-
-use scheduler::Instant;
-use smallvec::SmallVec;
-
 use crate::{
     Axis, GestureEvent, InputEvent, IsZero, Modifiers, MouseButton, MouseDownEvent, MouseEvent,
     MouseUpEvent, Pixels, PlatformInput, Point, ScrollDelta, ScrollEvent, ScrollSource, TouchEvent,
     TouchId, TouchPhase, point, px, seal::Sealed,
 };
+use scheduler::Instant;
+use smallvec::SmallVec;
+use std::{collections::VecDeque, mem, time::Duration};
 
 const SCROLL_EVENT_SEPARATION: Duration = Duration::from_millis(28);
+const SCROLL_AXIS_THRESHOLD: Pixels = px(6.);
+const SCROLL_AXIS_CHANGE_RATIO: f32 = 1.9;
 
 fn dominant_axis(delta: Point<Pixels>) -> Axis {
     if delta.x.abs() <= delta.y.abs() {
@@ -45,6 +43,8 @@ fn movements_oppose(left: Point<Pixels>, right: Point<Pixels>) -> bool {
 pub struct OngoingScroll {
     last_event: Option<Instant>,
     axis: Option<Axis>,
+    movement: Point<Pixels>,
+    unlocked: bool,
 }
 
 impl OngoingScroll {
@@ -57,47 +57,58 @@ impl OngoingScroll {
     }
 
     fn filter_at(&mut self, delta: &mut Point<Pixels>, touch_phase: TouchPhase, now: Instant) {
-        const UNLOCK_PERCENT: f32 = 1.9;
-        const UNLOCK_LOWER_BOUND: Pixels = px(6.);
-
         if matches!(touch_phase, TouchPhase::Ended | TouchPhase::Cancelled) {
-            self.last_event = None;
-            self.axis = None;
+            *self = Self::default();
             return;
         }
-
+        if touch_phase == TouchPhase::Started {
+            *self = Self::default();
+        }
         let x = delta.x.abs();
         let y = delta.y.abs();
         if x.is_zero() && y.is_zero() {
-            if touch_phase == TouchPhase::Started {
-                self.last_event = None;
-                self.axis = None;
-            }
             return;
         }
-
-        let starts_new_gesture = touch_phase == TouchPhase::Started
-            || self
-                .last_event
-                .is_none_or(|last_event| now.duration_since(last_event) >= SCROLL_EVENT_SEPARATION);
-        let mut axis = self.axis;
-        if starts_new_gesture {
-            axis = Some(dominant_axis(*delta));
-        } else if x.max(y) >= UNLOCK_LOWER_BOUND {
-            match axis {
-                Some(Axis::Vertical) if x > y && x >= y * UNLOCK_PERCENT => {
-                    axis = None;
+        if self
+            .last_event
+            .is_none_or(|last_event| now.duration_since(last_event) >= SCROLL_EVENT_SEPARATION)
+        {
+            *self = Self::default();
+        }
+        self.last_event = Some(now);
+        if self.unlocked {
+            return;
+        }
+        match self.axis {
+            None => {
+                self.movement += *delta;
+                if self.movement.x.abs().max(self.movement.y.abs()) >= SCROLL_AXIS_THRESHOLD {
+                    self.axis = Some(dominant_axis(self.movement));
+                    self.movement = Point::default();
                 }
-                Some(Axis::Horizontal) if y > x && y >= x * UNLOCK_PERCENT => {
-                    axis = None;
+            }
+            Some(axis) => {
+                let (along, across) = match axis {
+                    Axis::Horizontal => (x, y),
+                    Axis::Vertical => (y, x),
+                };
+                if across > along && across >= along * SCROLL_AXIS_CHANGE_RATIO {
+                    self.movement += *delta;
+                    let across = match axis {
+                        Axis::Horizontal => self.movement.y.abs(),
+                        Axis::Vertical => self.movement.x.abs(),
+                    };
+                    if across >= SCROLL_AXIS_THRESHOLD {
+                        self.axis = None;
+                        self.unlocked = true;
+                        self.movement = Point::default();
+                    }
+                } else {
+                    self.movement = Point::default();
                 }
-                _ => {}
             }
         }
-
-        self.last_event = Some(now);
-        self.axis = axis;
-        if let Some(axis) = axis {
+        if let Some(axis) = self.axis {
             lock_delta_to_axis(delta, axis);
         }
     }
@@ -1183,121 +1194,13 @@ fn quadratic_velocity_at_newest(times: &[f64], values: &[f64]) -> Option<f64> {
 }
 
 #[cfg(test)]
+#[path = "../tests/unit/ongoing_scroll.rs"]
+mod ongoing_scroll_tests;
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use crate::point;
-
-    #[test]
-    fn ongoing_scroll_locks_to_dominant_axis() {
-        let now = Instant::now();
-        let mut ongoing_scroll = OngoingScroll::default();
-        let mut horizontal_delta = point(px(10.), px(2.));
-        ongoing_scroll.filter_at(&mut horizontal_delta, TouchPhase::Started, now);
-        assert_eq!(ongoing_scroll.axis, Some(Axis::Horizontal));
-        assert_eq!(horizontal_delta, point(px(10.), px(0.)));
-
-        let mut continued_delta = point(px(3.), px(2.));
-        ongoing_scroll.filter_at(
-            &mut continued_delta,
-            TouchPhase::Moved,
-            now + Duration::from_millis(1),
-        );
-        assert_eq!(ongoing_scroll.axis, Some(Axis::Horizontal));
-        assert_eq!(continued_delta, point(px(3.), px(0.)));
-    }
-
-    #[test]
-    fn ongoing_scroll_unlocks_when_direction_changes() {
-        let now = Instant::now();
-        let mut ongoing_scroll = OngoingScroll::default();
-        let mut horizontal_delta = point(px(10.), px(2.));
-        ongoing_scroll.filter_at(&mut horizontal_delta, TouchPhase::Started, now);
-
-        let mut vertical_delta = point(px(2.), px(10.));
-        ongoing_scroll.filter_at(
-            &mut vertical_delta,
-            TouchPhase::Moved,
-            now + Duration::from_millis(1),
-        );
-        assert_eq!(ongoing_scroll.axis, None);
-        assert_eq!(vertical_delta, point(px(2.), px(10.)));
-    }
-
-    #[test]
-    fn ongoing_scroll_starts_new_gesture_at_timeout_boundary() {
-        let now = Instant::now();
-        let mut ongoing_scroll = OngoingScroll::default();
-        let mut horizontal_delta = point(px(10.), px(2.));
-        ongoing_scroll.filter_at(&mut horizontal_delta, TouchPhase::Moved, now);
-
-        let mut vertical_delta = point(px(2.), px(10.));
-        ongoing_scroll.filter_at(
-            &mut vertical_delta,
-            TouchPhase::Moved,
-            now + SCROLL_EVENT_SEPARATION,
-        );
-        assert_eq!(ongoing_scroll.axis, Some(Axis::Vertical));
-        assert_eq!(vertical_delta, point(px(0.), px(10.)));
-    }
-
-    #[test]
-    fn ongoing_scroll_ignores_zero_delta_and_resets_when_ended() {
-        let now = Instant::now();
-        let mut ongoing_scroll = OngoingScroll::default();
-        let mut horizontal_delta = point(px(10.), px(2.));
-        ongoing_scroll.filter_at(&mut horizontal_delta, TouchPhase::Started, now);
-
-        let mut zero_delta = Point::default();
-        ongoing_scroll.filter_at(
-            &mut zero_delta,
-            TouchPhase::Ended,
-            now + Duration::from_millis(1),
-        );
-        assert_eq!(ongoing_scroll.axis, None);
-
-        let mut vertical_delta = point(px(2.), px(3.));
-        ongoing_scroll.filter_at(
-            &mut vertical_delta,
-            TouchPhase::Moved,
-            now + Duration::from_millis(2),
-        );
-        assert_eq!(ongoing_scroll.axis, Some(Axis::Vertical));
-        assert_eq!(vertical_delta, point(px(0.), px(3.)));
-    }
-
-    #[test]
-    fn ongoing_scroll_ignores_zero_delta_movement() {
-        let now = Instant::now();
-        let mut ongoing_scroll = OngoingScroll::default();
-        let mut horizontal_delta = point(px(10.), px(2.));
-        ongoing_scroll.filter_at(&mut horizontal_delta, TouchPhase::Started, now);
-
-        let mut zero_delta = Point::default();
-        ongoing_scroll.filter_at(
-            &mut zero_delta,
-            TouchPhase::Moved,
-            now + SCROLL_EVENT_SEPARATION,
-        );
-
-        let mut vertical_delta = point(px(2.), px(10.));
-        ongoing_scroll.filter_at(
-            &mut vertical_delta,
-            TouchPhase::Moved,
-            now + SCROLL_EVENT_SEPARATION,
-        );
-        assert_eq!(ongoing_scroll.axis, Some(Axis::Vertical));
-        assert_eq!(vertical_delta, point(px(0.), px(10.)));
-    }
-
-    #[test]
-    fn ongoing_scroll_supports_moved_only_platforms() {
-        let now = Instant::now();
-        let mut ongoing_scroll = OngoingScroll::default();
-        let mut horizontal_delta = point(px(10.), px(2.));
-        ongoing_scroll.filter_at(&mut horizontal_delta, TouchPhase::Moved, now);
-        assert_eq!(ongoing_scroll.axis, Some(Axis::Horizontal));
-        assert_eq!(horizontal_delta, point(px(10.), px(0.)));
-    }
 
     #[test]
     fn touch_within_slop_resolves_to_tap() {
